@@ -44,6 +44,23 @@ function AutoFit({ areas }) {
   return null;
 }
 
+// Flies to the selected area whenever selectedArea changes.
+// Uses a ref for areas so the 30s data refresh doesn't re-trigger the zoom.
+function ZoomToSelected({ areas, selectedArea }) {
+  const map = useMap();
+  const areasRef = useRef(areas);
+  areasRef.current = areas;
+
+  useEffect(() => {
+    if (!selectedArea) return;
+    const area = areasRef.current.find((a) => a.area_name === selectedArea);
+    if (!area?.lat || !area?.lon) return;
+    map.flyTo([parseFloat(area.lat), parseFloat(area.lon)], 12, { duration: 1 });
+  }, [selectedArea, map]);
+
+  return null;
+}
+
 // Clicking empty map space selects the nearest area
 function MapClickHandler({ areas, onSelectArea }) {
   useMapEvents({
@@ -77,6 +94,7 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <AutoFit areas={areas} />
+      <ZoomToSelected areas={areas} selectedArea={selectedArea} />
       <MapClickHandler areas={areas} onSelectArea={onSelectArea} />
 
       {areas.map((area) => {
