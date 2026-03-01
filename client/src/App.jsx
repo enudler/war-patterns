@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import Map from './components/Map';
+import MapView from './components/Map';
 import Sidebar from './components/Sidebar';
 import { fetchAreas, fetchSummary, fetchAllAreas, fetchStatus } from './api/client';
 
@@ -130,7 +130,7 @@ export default function App() {
             Updated {lastUpdated.toLocaleTimeString()}
           </div>
         )}
-        <Map areas={mergedAreas} selectedArea={selectedArea} onSelectArea={setSelectedArea} days={days} />
+        <MapView areas={mergedAreas} selectedArea={selectedArea} onSelectArea={setSelectedArea} days={days} />
       </div>
       <Sidebar
         selectedArea={selectedArea}
