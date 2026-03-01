@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 const migrate = require('./db/migrate');
 const { startPoller } = require('./poller/oref');
 const alertRoutes = require('./routes/alerts');
@@ -15,6 +17,13 @@ app.use(express.json());
 app.use('/api', alertRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+// Serve the built React client when the /public directory exists (Docker).
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+if (fs.existsSync(PUBLIC_DIR)) {
+  app.use(express.static(PUBLIC_DIR));
+  app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+}
 
 async function main() {
   try {

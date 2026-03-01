@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Empty string → relative paths (same origin, used in Docker).
+// Undefined (dev without .env) → default to localhost.
+const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 
 const api = axios.create({ baseURL: BASE });
 

@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: war_patterns
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d war_patterns"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    image: ghcr.io/enudler/war-patterns:latest
+    build: .                          # used when running `docker compose up --build`
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: war_patterns
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PORT: 3001
+      POLL_INTERVAL_MS: 15000
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pgdata:
