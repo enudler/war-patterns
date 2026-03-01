@@ -1,0 +1,15 @@
+{
+  "name": "war-patterns",
+  "version": "1.0.0",
+  "description": "Tracks missile and alert events from the Israeli Home Front Command (Pikud Ha'oref), stores them in PostgreSQL, and displays trends on an interactive map.",
+  "main": "index.js",
+  "scripts": {
+    "start": "concurrently --names \"server,client\" --prefix-colors \"red,cyan\" \"npm run dev --prefix server\" \"npm run dev --prefix client\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
