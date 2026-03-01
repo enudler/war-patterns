@@ -53,10 +53,10 @@ function ZoomToSelected({ areas, selectedArea }) {
 
   useEffect(() => {
     if (!selectedArea) return;
-    const area = areasRef.current.find((a) => a.area_name === selectedArea);
+    const area = areasRef.current.find((a) => a.area_name_he === selectedArea);
     if (!area?.lat || !area?.lon) return;
     map.flyTo([parseFloat(area.lat), parseFloat(area.lon)], 12, { duration: 1 });
-  }, [selectedArea, map]);
+  }, [selectedArea, map]); // areas read via ref — no re-zoom on 30s refresh
 
   return null;
 }
@@ -76,7 +76,7 @@ function MapClickHandler({ areas, onSelectArea }) {
         const dist = dlat * dlat + dlon * dlon;
         if (dist < minDist) { minDist = dist; nearest = area; }
       }
-      if (nearest) onSelectArea(nearest.area_name);
+      if (nearest) onSelectArea(nearest.area_name_he);
     },
   });
   return null;
@@ -104,13 +104,13 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
 
         const count = parseInt(area.alert_count, 10) || 0;
         const cat = parseInt(area.dominant_category, 10);
-        const isSelected = selectedArea === area.area_name;
+        const isSelected = selectedArea === area.area_name_he;
         const hasAlerts = count > 0;
         const color = hasAlerts ? categoryColor(cat) : '#4b5563';
 
         return (
           <CircleMarker
-            key={area.area_name}
+            key={area.area_name_he}
             center={[lat, lon]}
             radius={radiusForCount(count)}
             pathOptions={{
@@ -122,7 +122,7 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
             eventHandlers={{
               click: (e) => {
                 e.originalEvent.stopPropagation();
-                onSelectArea(area.area_name);
+                onSelectArea(area.area_name_he);
               },
             }}
           >

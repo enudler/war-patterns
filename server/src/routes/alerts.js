@@ -40,17 +40,17 @@ function timeClause(query, paramBase = 1) {
 }
 
 // GET /api/areas?days=N  or  ?today=1
-// Groups only by area_name+lat+lon (not area_name_he) so sub-areas merge into one marker.
-// Counts distinct (alerted_at, category) pairs to avoid inflating counts for multi-sub-area alerts.
+// Groups by area_name_he so every oref sub-area gets its own marker on the map.
 router.get('/areas', async (req, res) => {
   const tc = timeClause(req.query, 1);
   try {
     const result = await pool.query(
       `SELECT
+         area_name_he,
          area_name,
          lat,
          lon,
-         COUNT(DISTINCT (alerted_at, category))          AS alert_count,
+         COUNT(*)                                         AS alert_count,
          MAX(alerted_at)                                  AS last_alert,
          MODE() WITHIN GROUP (ORDER BY category)          AS dominant_category,
          MODE() WITHIN GROUP (ORDER BY category_desc)     AS dominant_category_desc
@@ -58,7 +58,7 @@ router.get('/areas', async (req, res) => {
        WHERE ${tc.clause}
          AND lat IS NOT NULL
          AND ${EXCLUDE_FILTER}
-       GROUP BY area_name, lat, lon
+       GROUP BY area_name_he, area_name, lat, lon
        ORDER BY alert_count DESC`,
       tc.params
     );
@@ -69,21 +69,20 @@ router.get('/areas', async (req, res) => {
   }
 });
 
-// GET /api/alerts?area=<name>&days=N  or  ?area=<name>&today=1
-// DISTINCT ON (alerted_at, category) collapses sub-area duplicates into one row per event.
+// GET /api/alerts?area=<area_name_he>&days=N  or  ?area=<area_name_he>&today=1
+// area param is the Hebrew sub-area name (area_name_he).
 router.get('/alerts', async (req, res) => {
   const area = req.query.area;
   if (!area) return res.status(400).json({ error: 'area param required' });
   const tc = timeClause(req.query, 2);
   try {
     const result = await pool.query(
-      `SELECT DISTINCT ON (alerted_at, category)
-         id, oref_id, category, category_desc, area_name, lat, lon, alerted_at
+      `SELECT id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
        FROM alerts
-       WHERE area_name = $1
+       WHERE area_name_he = $1
          AND ${tc.clause}
          AND ${EXCLUDE_FILTER}
-       ORDER BY alerted_at DESC, category, id
+       ORDER BY alerted_at DESC
        LIMIT 100`,
       [area, ...tc.params]
     );
@@ -94,8 +93,8 @@ router.get('/alerts', async (req, res) => {
   }
 });
 
-// GET /api/stats?area=<name>&days=N  or  ?area=<name>&today=1
-// Uses a CTE to deduplicate sub-area rows before aggregating, so counts reflect real events.
+// GET /api/stats?area=<area_name_he>&days=N  or  ?area=<area_name_he>&today=1
+// area param is the Hebrew sub-area name (area_name_he).
 router.get('/stats', async (req, res) => {
   const area = req.query.area;
   if (!area) return res.status(400).json({ error: 'area param required' });
@@ -104,13 +103,11 @@ router.get('/stats', async (req, res) => {
 
   const dedupCte = `
     WITH deduped AS (
-      SELECT DISTINCT ON (alerted_at, category)
-        alerted_at, category, category_desc
+      SELECT alerted_at, category, category_desc
       FROM alerts
-      WHERE area_name = $1
+      WHERE area_name_he = $1
         AND ${tc.clause}
         AND ${EXCLUDE_FILTER}
-      ORDER BY alerted_at, category, id
     )
   `;
 

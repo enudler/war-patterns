@@ -4,7 +4,8 @@ import Sidebar from './components/Sidebar';
 import { fetchAreas, fetchSummary, fetchAllAreas, fetchStatus } from './api/client';
 
 const REFRESH_INTERVAL_MS = 30_000;
-const FAVORITE_KEY = 'war_patterns_favorite_area';
+// v2 key: selectedArea is now area_name_he (Hebrew); old English values are incompatible
+const FAVORITE_KEY = 'war_patterns_favorite_area_v2';
 
 function findNearest(lat, lon, areas) {
   let nearest = null;
@@ -23,6 +24,7 @@ export default function App() {
   const [days, setDays] = useState(7);
   const [allAreas, setAllAreas] = useState([]);
   const [alertAreas, setAlertAreas] = useState([]);
+  // selectedArea is area_name_he (Hebrew sub-area name) — the unique identifier
   const [selectedArea, setSelectedArea] = useState(null);
   const [favoriteArea, setFavoriteAreaState] = useState(
     () => localStorage.getItem(FAVORITE_KEY) || null
@@ -33,13 +35,13 @@ export default function App() {
   const [error, setError] = useState(null);
   const autoSelected = useRef(false);
 
-  function toggleFavorite(areaName) {
-    if (favoriteArea === areaName) {
+  function toggleFavorite(areaNameHe) {
+    if (favoriteArea === areaNameHe) {
       localStorage.removeItem(FAVORITE_KEY);
       setFavoriteAreaState(null);
     } else {
-      localStorage.setItem(FAVORITE_KEY, areaName);
-      setFavoriteAreaState(areaName);
+      localStorage.setItem(FAVORITE_KEY, areaNameHe);
+      setFavoriteAreaState(areaNameHe);
     }
   }
 
@@ -64,7 +66,7 @@ export default function App() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const nearest = findNearest(pos.coords.latitude, pos.coords.longitude, allAreas);
-        if (nearest) setSelectedArea(nearest.area_name);
+        if (nearest) setSelectedArea(nearest.area_name_he);
       },
       () => {}, // fail silently — user just won't get auto-selection
       { timeout: 6000, maximumAge: 300_000 }
@@ -89,12 +91,22 @@ export default function App() {
     return () => clearInterval(id);
   }, [loadAlerts]);
 
-  const mergedAreas = allAreas.map((a) => {
-    const hit = alertAreas.find((x) => x.area_name === a.area_name);
-    return hit
-      ? hit
-      : { ...a, alert_count: 0, dominant_category: 0, dominant_category_desc: 'No alerts' };
-  });
+  // Merge static area list (allAreas) with alert counts (alertAreas), keyed by area_name_he.
+  // Known areas with no alerts → shown as 0-count circles.
+  // oref sub-areas not in areas.json but with alerts → added as extras.
+  const alertAreaMap = new Map(alertAreas.map((a) => [a.area_name_he, a]));
+  const allAreaSet = new Set(allAreas.map((a) => a.area_name_he));
+
+  const mergedKnown = allAreas.map((a) =>
+    alertAreaMap.get(a.area_name_he) ?? { ...a, alert_count: 0, dominant_category: 0, dominant_category_desc: 'No alerts' }
+  );
+  const extras = alertAreas.filter((a) => !allAreaSet.has(a.area_name_he));
+  const mergedAreas = [...mergedKnown, ...extras];
+
+  // Derive English display names for selected and favourite areas
+  const areaLabelMap = new Map(mergedAreas.map((a) => [a.area_name_he, a.area_name]));
+  const selectedAreaLabel = selectedArea ? (areaLabelMap.get(selectedArea) ?? selectedArea) : null;
+  const favoriteAreaLabel = favoriteArea ? (areaLabelMap.get(favoriteArea) ?? favoriteArea) : null;
 
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f0f1a' }}>
@@ -122,7 +134,9 @@ export default function App() {
       </div>
       <Sidebar
         selectedArea={selectedArea}
+        selectedAreaLabel={selectedAreaLabel}
         favoriteArea={favoriteArea}
+        favoriteAreaLabel={favoriteAreaLabel}
         onToggleFavorite={toggleFavorite}
         days={days}
         onDaysChange={setDays}

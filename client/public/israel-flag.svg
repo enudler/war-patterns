@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 200">
+  <!-- White background -->
+  <rect width="300" height="200" fill="#FFFFFF"/>
+  <!-- Top blue stripe -->
+  <rect y="30" width="300" height="22" fill="#0038B8"/>
+  <!-- Bottom blue stripe -->
+  <rect y="148" width="300" height="22" fill="#0038B8"/>
+  <!-- Star of David: two interlocking outline triangles -->
+  <!-- Triangle pointing up: apex top, base bottom -->
+  <polygon points="150,68 176,113 124,113" fill="none" stroke="#0038B8" stroke-width="7" stroke-linejoin="round"/>
+  <!-- Triangle pointing down: apex bottom, base top -->
+  <polygon points="150,132 124,87 176,87" fill="none" stroke="#0038B8" stroke-width="7" stroke-linejoin="round"/>
+</svg>

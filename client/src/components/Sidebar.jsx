@@ -36,7 +36,7 @@ function formatTs(ts) {
   });
 }
 
-export default function Sidebar({ selectedArea, favoriteArea, onToggleFavorite, days, onDaysChange, summary, dataStatus }) {
+export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea, favoriteAreaLabel, onToggleFavorite, days, onDaysChange, summary, dataStatus }) {
   const availableDays = dataStatus?.oldest
     ? Math.floor((Date.now() - new Date(dataStatus.oldest).getTime()) / 86_400_000)
     : null;
@@ -88,7 +88,7 @@ export default function Sidebar({ selectedArea, favoriteArea, onToggleFavorite, 
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', flex: 1 }}>
-            {selectedArea || 'Select a location on the map'}
+            {selectedAreaLabel || 'Select a location on the map'}
           </div>
           {selectedArea && (
             <button
@@ -115,7 +115,7 @@ export default function Sidebar({ selectedArea, favoriteArea, onToggleFavorite, 
             {isFavorite
               ? '⭐ Default location — loads automatically on startup'
               : favoriteArea
-                ? `Default: ${favoriteArea} · click ☆ to change`
+                ? `Default: ${favoriteAreaLabel ?? favoriteArea} · click ☆ to change`
                 : 'Click ☆ to set as default location'}
           </div>
         )}
