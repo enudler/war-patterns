@@ -7,29 +7,6 @@ const REFRESH_INTERVAL_MS = 30_000;
 // v2 key: selectedArea is now area_name_he (Hebrew); old English values are incompatible
 const FAVORITE_KEY = 'war_patterns_favorite_area_v2';
 
-// When multiple sub-areas share identical coordinates, spread them in a circle
-// so each marker is individually clickable on the map.
-function jitterOverlapping(areas) {
-  const JITTER_DEG = 0.012; // ~1.3 km — small enough to look local, big enough to click
-  const groups = new Map();
-  for (const a of areas) {
-    const key = `${a.lat},${a.lon}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(a);
-  }
-  return areas.map((a) => {
-    const siblings = groups.get(`${a.lat},${a.lon}`);
-    if (siblings.length === 1) return a;
-    const idx = siblings.indexOf(a);
-    const angle = (2 * Math.PI * idx) / siblings.length;
-    return {
-      ...a,
-      lat: parseFloat(a.lat) + JITTER_DEG * Math.sin(angle),
-      lon: parseFloat(a.lon) + JITTER_DEG * Math.cos(angle),
-    };
-  });
-}
-
 function findNearest(lat, lon, areas) {
   let nearest = null;
   let minDist = Infinity;
@@ -124,7 +101,7 @@ export default function App() {
     alertAreaMap.get(a.area_name_he) ?? { ...a, alert_count: 0, dominant_category: 0, dominant_category_desc: 'No alerts' }
   );
   const extras = alertAreas.filter((a) => !allAreaSet.has(a.area_name_he));
-  const mergedAreas = jitterOverlapping([...mergedKnown, ...extras]);
+  const mergedAreas = [...mergedKnown, ...extras];
 
   // Derive English display names for selected and favourite areas
   const areaLabelMap = new Map(mergedAreas.map((a) => [a.area_name_he, a.area_name]));
