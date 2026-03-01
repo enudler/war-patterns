@@ -131,8 +131,9 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
                 <strong>{area.area_name}</strong>
                 <br />
                 {hasAlerts
-                  ? <><span style={{ color }}>{count} alert{count !== 1 ? 's' : ''}</span> in {days}d</>
-                  : <span style={{ color: '#888' }}>No alerts in {days}d</span>
+                  ? <><span style={{ color }}>{count} alert{count !== 1 ? 's' : ''}</span>{' '}
+                      {days === 'today' ? 'today' : `in ${days}d`}</>
+                  : <span style={{ color: '#888' }}>No alerts {days === 'today' ? 'today' : `in ${days}d`}</span>
                 }
                 {hasAlerts && (
                   <><br /><span style={{ color }}>{area.dominant_category_desc}</span></>
