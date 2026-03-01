@@ -97,7 +97,7 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
   function handleMarkerClick(e, area) {
     e.originalEvent.stopPropagation();
     const key = `${area.lat},${area.lon}`;
-    const siblings = coordGroups[key] || [];
+    const siblings = (coordGroups[key] || []).filter((a) => parseInt(a.alert_count, 10) > 0);
     if (siblings.length > 1) {
       setPicker({ lat: parseFloat(area.lat), lon: parseFloat(area.lon), options: siblings });
     } else {
