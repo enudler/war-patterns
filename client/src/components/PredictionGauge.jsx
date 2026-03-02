@@ -403,10 +403,25 @@ export default function PredictionGauge({ area }) {
         </div>
 
         {/* Meta info — always from offset-0 (real-time stats) */}
-        {predictions[0] && (() => {
-          const meta0 = timeline.meta;
-          return null; // meta not returned by timeline endpoint; omit to keep compact
-        })()}
+        {predictions[0]?.meta && (
+          <div style={{
+            marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex', flexWrap: 'wrap', gap: '3px 14px', fontSize: 10, color: '#444',
+          }}>
+            {predictions[0].meta.alertsLast24h != null && (
+              <span>{predictions[0].meta.alertsLast24h} alerts in 24h</span>
+            )}
+            {predictions[0].meta.hoursSinceLastAlert != null && (
+              <span>Last alert {predictions[0].meta.hoursSinceLastAlert < 1
+                ? `${Math.round(predictions[0].meta.hoursSinceLastAlert * 60)}m ago`
+                : `${predictions[0].meta.hoursSinceLastAlert.toFixed(1)}h ago`}
+              </span>
+            )}
+            {predictions[0].meta.totalAlerts > 0 && (
+              <span>{predictions[0].meta.totalAlerts} total in {predictions[0].meta.observationHours.toFixed(0)}h window</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

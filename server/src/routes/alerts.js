@@ -81,10 +81,10 @@ router.get('/areas', async (req, res) => {
            AND ${EXCLUDE_FILTER}
        ),
        deduped AS (
-         SELECT DISTINCT ON (base_name_he, DATE_TRUNC('minute', alerted_at), category)
+         SELECT DISTINCT ON (base_name_he, date_bin('3 minutes', alerted_at, '1970-01-01'), category)
            base_name_he, base_name_en, alerted_at, category, category_desc, lat, lon, orig_name_he
          FROM base
-         ORDER BY base_name_he, DATE_TRUNC('minute', alerted_at), category
+         ORDER BY base_name_he, date_bin('3 minutes', alerted_at, '1970-01-01'), category
        )
        SELECT
          base_name_he                                      AS area_name_he,
@@ -116,18 +116,18 @@ router.get('/areas/:area/alerts', async (req, res) => {
   const area = req.params.area;
   const tc = timeClause(req.query, 3);
   try {
-    // DISTINCT ON (minute-truncated alerted_at, category) collapses sibling
+    // DISTINCT ON (3-minute-bucketed alerted_at, category) collapses sibling
     // sub-areas AND near-duplicate rows (the poller can record the same active
-    // alert every ~15 s with slightly different timestamps) into one row per
-    // minute+category, eliminating duplicate entries in the sidebar list.
+    // alert every ~15 s with slightly different timestamps across minute
+    // boundaries) into one row per 3-minute bucket+category.
     const result = await pool.query(
-      `SELECT DISTINCT ON (DATE_TRUNC('minute', alerted_at), category)
+      `SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
          id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
        FROM alerts
        WHERE ${areaClause(1)}
          AND ${tc.clause}
          AND ${EXCLUDE_FILTER}
-       ORDER BY DATE_TRUNC('minute', alerted_at) DESC, category
+       ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01') DESC, category
        LIMIT 100`,
       [...areaParams(area), ...tc.params]
     );
@@ -146,18 +146,19 @@ router.get('/areas/:area/stats', async (req, res) => {
   const tc = timeClause(req.query, 3);
   const qParams = [...areaParams(area), ...tc.params];
 
-  // DISTINCT ON (minute-truncated alerted_at, category) collapses sibling
+  // DISTINCT ON (3-minute-bucketed alerted_at, category) collapses sibling
   // sub-areas AND near-duplicate rows from the poller (which can record the
-  // same active alert every ~15 s) so chart counts reflect unique events.
+  // same active alert every ~15 s across minute boundaries) so chart counts
+  // reflect unique events.
   const dedupCte = `
     WITH deduped AS (
-      SELECT DISTINCT ON (DATE_TRUNC('minute', alerted_at), category)
+      SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
         alerted_at, category, category_desc
       FROM alerts
       WHERE ${areaClause(1)}
         AND ${tc.clause}
         AND ${EXCLUDE_FILTER}
-      ORDER BY DATE_TRUNC('minute', alerted_at), category
+      ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01'), category
     )
   `;
 
@@ -599,6 +600,7 @@ router.get('/areas/:area/prediction/timeline', async (req, res) => {
         probability: pred.probability,
         riskLevel:   pred.riskLevel,
         factors:     pred.factors,
+        ...(offset === 0 ? { meta: pred.meta } : {}),
       });
     }
 

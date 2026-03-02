@@ -40,11 +40,16 @@ function geocode(hebrewName) {
   return { lat: null, lon: null, name_en: hebrewName };
 }
 
-// Stable dedup key: sha1 of alertDate + area name (no id field in API)
+// Stable dedup key: sha1 of 3-minute-bucketed alertDate + area name.
+// Bucketing prevents duplicate rows when the oref live endpoint returns
+// an updated alertDate for the same active alert on every 15-second poll.
 function makeOrefId(alertDate, areaName) {
+  const dateMs = new Date(alertDate.replace(' ', 'T')).getTime();
+  const bucketMs = Math.floor(dateMs / (3 * 60_000)) * (3 * 60_000);
+  const bucketStr = new Date(bucketMs).toISOString();
   return crypto
     .createHash('sha1')
-    .update(`${alertDate}|${areaName}`)
+    .update(`${bucketStr}|${areaName}`)
     .digest('hex')
     .slice(0, 28);
 }

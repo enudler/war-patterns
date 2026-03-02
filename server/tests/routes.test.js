@@ -95,13 +95,13 @@ describe('GET /api/areas/:area/alerts  (RESTful path param)', () => {
     expect(res.body[0].alerted_at).toBe(ts);
   });
 
-  test('SQL uses DATE_TRUNC(minute) for dedup, not exact timestamps', async () => {
-    // Verify the query uses minute-level dedup to collapse near-duplicate
-    // alerts that the poller records every ~15 s with slightly different timestamps.
+  test('SQL uses date_bin(3 minutes) for dedup, not exact timestamps', async () => {
+    // Verify the query uses 3-minute-bucket dedup to collapse near-duplicate
+    // alerts that the poller records every ~15 s across minute boundaries.
     pool.query.mockResolvedValue({ rows: [] });
     await request(app).get('/api/areas/Test/alerts');
     const sql = pool.query.mock.calls[0][0];
-    expect(sql).toContain("DATE_TRUNC('minute', alerted_at)");
+    expect(sql).toContain("date_bin('3 minutes', alerted_at, '1970-01-01')");
     expect(sql).not.toMatch(/DISTINCT ON \(alerted_at,/);
   });
 
@@ -142,7 +142,7 @@ describe('GET /api/areas/:area/stats  (RESTful path param)', () => {
     expect(res.body.area).toBe('MyArea');
   });
 
-  test('stats CTE uses DATE_TRUNC(minute) for dedup', async () => {
+  test('stats CTE uses date_bin(3 minutes) for dedup', async () => {
     pool.query
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
@@ -152,7 +152,7 @@ describe('GET /api/areas/:area/stats  (RESTful path param)', () => {
     await request(app).get('/api/areas/Test/stats');
     // All four stats queries share the same dedupCte; check the first one
     const sql = pool.query.mock.calls[0][0];
-    expect(sql).toContain("DATE_TRUNC('minute', alerted_at)");
+    expect(sql).toContain("date_bin('3 minutes', alerted_at, '1970-01-01')");
   });
 });
 
@@ -363,6 +363,18 @@ describe('GET /api/areas/:area/prediction/timeline', () => {
     const res = await request(app).get('/api/areas/Test/prediction/timeline');
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty('error');
+  });
+
+  test('offset=0 prediction includes meta, others do not', async () => {
+    mockTimelineDb();
+    const res = await request(app).get('/api/areas/Test/prediction/timeline');
+    expect(res.body.predictions[0]).toHaveProperty('meta');
+    expect(res.body.predictions[0].meta).toHaveProperty('totalAlerts');
+    expect(res.body.predictions[0].meta).toHaveProperty('currentHour');
+    // offset > 0 should not have meta
+    if (res.body.predictions.length > 1) {
+      expect(res.body.predictions[1]).not.toHaveProperty('meta');
+    }
   });
 
   test('returns probability=0 for all hours when there is no history', async () => {
