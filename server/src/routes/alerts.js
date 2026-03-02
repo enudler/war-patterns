@@ -81,10 +81,10 @@ router.get('/areas', async (req, res) => {
            AND ${EXCLUDE_FILTER}
        ),
        deduped AS (
-         SELECT DISTINCT ON (base_name_he, alerted_at, category)
+         SELECT DISTINCT ON (base_name_he, DATE_TRUNC('minute', alerted_at), category)
            base_name_he, base_name_en, alerted_at, category, category_desc, lat, lon, orig_name_he
          FROM base
-         ORDER BY base_name_he, alerted_at, category
+         ORDER BY base_name_he, DATE_TRUNC('minute', alerted_at), category
        )
        SELECT
          base_name_he                                      AS area_name_he,
@@ -116,17 +116,18 @@ router.get('/areas/:area/alerts', async (req, res) => {
   const area = req.params.area;
   const tc = timeClause(req.query, 3);
   try {
-    // DISTINCT ON (alerted_at, category) collapses sibling sub-areas that fired
-    // at exactly the same timestamp into one row, eliminating duplicate entries
-    // in the sidebar list (e.g. "אשקלון - דרום" and "אשקלון - צפון" at 12:00).
+    // DISTINCT ON (minute-truncated alerted_at, category) collapses sibling
+    // sub-areas AND near-duplicate rows (the poller can record the same active
+    // alert every ~15 s with slightly different timestamps) into one row per
+    // minute+category, eliminating duplicate entries in the sidebar list.
     const result = await pool.query(
-      `SELECT DISTINCT ON (alerted_at, category)
+      `SELECT DISTINCT ON (DATE_TRUNC('minute', alerted_at), category)
          id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
        FROM alerts
        WHERE ${areaClause(1)}
          AND ${tc.clause}
          AND ${EXCLUDE_FILTER}
-       ORDER BY alerted_at DESC, category
+       ORDER BY DATE_TRUNC('minute', alerted_at) DESC, category
        LIMIT 100`,
       [...areaParams(area), ...tc.params]
     );
@@ -145,17 +146,18 @@ router.get('/areas/:area/stats', async (req, res) => {
   const tc = timeClause(req.query, 3);
   const qParams = [...areaParams(area), ...tc.params];
 
-  // DISTINCT ON (alerted_at, category) collapses sibling sub-areas (e.g.
-  // "אשקלון - דרום" + "אשקלון - צפון") that fired at the same timestamp so
-  // chart counts and totals reflect unique events, not per-sub-area rows.
+  // DISTINCT ON (minute-truncated alerted_at, category) collapses sibling
+  // sub-areas AND near-duplicate rows from the poller (which can record the
+  // same active alert every ~15 s) so chart counts reflect unique events.
   const dedupCte = `
     WITH deduped AS (
-      SELECT DISTINCT ON (alerted_at, category) alerted_at, category, category_desc
+      SELECT DISTINCT ON (DATE_TRUNC('minute', alerted_at), category)
+        alerted_at, category, category_desc
       FROM alerts
       WHERE ${areaClause(1)}
         AND ${tc.clause}
         AND ${EXCLUDE_FILTER}
-      ORDER BY alerted_at, category
+      ORDER BY DATE_TRUNC('minute', alerted_at), category
     )
   `;
 
@@ -474,6 +476,135 @@ router.get('/areas/:area/prediction', async (req, res) => {
     res.json({ area, ...prediction });
   } catch (err) {
     console.error('[/prediction]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/areas/:area/prediction/timeline?hours=12
+// Returns per-hour attack probability for the next N hours (default 12).
+// Reuses the same 5 DB queries as /prediction but calls computePrediction once
+// per hour — no extra DB round-trips needed since hourlyMap/dowMap already hold
+// all 24-hour and 7-day pattern data.
+router.get('/areas/:area/prediction/timeline', async (req, res) => {
+  const area = req.params.area;
+  const numHours = Math.min(Math.max(parseInt(req.query.hours || '12', 10), 1), 24);
+
+  try {
+    const predFilter = `${areaClause(1)} AND ${EXCLUDE_FILTER}`;
+    const predParams = areaParams(area);
+
+    const [observationResult, hourlyResult, last24hResult, lastAlertResult, dowResult] =
+      await Promise.all([
+        pool.query(
+          `SELECT
+             COUNT(*) AS total_alerts,
+             COUNT(DISTINCT DATE_TRUNC('hour', alerted_at AT TIME ZONE 'Asia/Jerusalem')) AS hours_with_alerts,
+             EXTRACT(EPOCH FROM (MAX(alerted_at) - MIN(alerted_at))) / 3600.0 AS observation_hours
+           FROM alerts
+           WHERE ${predFilter}`,
+          predParams
+        ),
+        pool.query(
+          `SELECT
+             EXTRACT(HOUR FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS hour,
+             COUNT(*) AS count
+           FROM alerts
+           WHERE ${predFilter}
+           GROUP BY hour
+           ORDER BY hour`,
+          predParams
+        ),
+        pool.query(
+          `SELECT COUNT(*) AS count
+           FROM alerts
+           WHERE ${predFilter}
+             AND alerted_at >= NOW() - INTERVAL '24 hours'`,
+          predParams
+        ),
+        pool.query(
+          `SELECT MAX(alerted_at) AS last_alert
+           FROM alerts
+           WHERE ${predFilter}`,
+          predParams
+        ),
+        pool.query(
+          `SELECT
+             EXTRACT(DOW FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS dow,
+             COUNT(*) AS count
+           FROM alerts
+           WHERE ${predFilter}
+           GROUP BY dow
+           ORDER BY dow`,
+          predParams
+        ),
+      ]);
+
+    const obs = observationResult.rows[0];
+    const totalAlerts      = parseInt(obs.total_alerts, 10);
+    const hoursWithAlerts  = parseInt(obs.hours_with_alerts, 10);
+    const observationHours = parseFloat(obs.observation_hours) || 0;
+
+    const hourlyMap = {};
+    let totalHourlyCounts = 0;
+    for (const row of hourlyResult.rows) {
+      hourlyMap[row.hour]  = parseInt(row.count, 10);
+      totalHourlyCounts   += parseInt(row.count, 10);
+    }
+
+    const alertsLast24h = parseInt(last24hResult.rows[0].count, 10);
+    const lastAlertTs   = lastAlertResult.rows[0].last_alert;
+
+    const dowMap = {};
+    let totalDowCounts = 0;
+    for (const row of dowResult.rows) {
+      dowMap[row.dow]  = parseInt(row.count, 10);
+      totalDowCounts  += parseInt(row.count, 10);
+    }
+
+    const now          = new Date();
+    const israelOffset = 2;
+    const dstShift     = isDST(now) ? 1 : 0;
+    const israelHour   = (now.getUTCHours() + israelOffset + dstShift) % 24;
+    const israelDay    = new Date(now.getTime() + (israelOffset + dstShift) * 3_600_000).getUTCDay();
+
+    // Generate one prediction per future hour offset.
+    // For offset h: advance the target hour/day and decay momentum as if h
+    // more hours have elapsed since the most recent alert.
+    const predictions = [];
+    for (let offset = 0; offset < numHours; offset++) {
+      const targetHour = (israelHour + offset) % 24;
+      const dayRollover = Math.floor((israelHour + offset) / 24);
+      const targetDay  = (israelDay + dayRollover) % 7;
+
+      // Shift lastAlertTs back by `offset` hours so momentum decays correctly
+      // for predictions further into the future.
+      const adjustedLastAlertTs = lastAlertTs
+        ? new Date(new Date(lastAlertTs).getTime() - offset * 3_600_000).toISOString()
+        : null;
+
+      const pred = computePrediction({
+        totalAlerts, hoursWithAlerts, observationHours,
+        hourlyMap, totalHourlyCounts,
+        alertsLast24h,
+        lastAlertTs: adjustedLastAlertTs,
+        dowMap, totalDowCounts,
+        israelHour: targetHour,
+        israelDay:  targetDay,
+      });
+
+      predictions.push({
+        hour:        targetHour,
+        offset,
+        label:       `${String(targetHour).padStart(2, '0')}:00`,
+        probability: pred.probability,
+        riskLevel:   pred.riskLevel,
+        factors:     pred.factors,
+      });
+    }
+
+    res.json({ area, currentHour: israelHour, predictions });
+  } catch (err) {
+    console.error('[/prediction/timeline]', err.message);
     res.status(500).json({ error: err.message });
   }
 });

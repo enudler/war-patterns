@@ -370,3 +370,51 @@ describe('computePrediction — DOW factor', () => {
     expect(factors.dowFactor).toBeLessThanOrEqual(10);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests relevant to the timeline feature: different target hours produce
+// different hourlyFactor values, and momentum decays for future offsets.
+// ---------------------------------------------------------------------------
+describe('computePrediction — hour-shifting for timeline', () => {
+  // Build an hourly map where only hour 6 is very active and hour 18 is quiet.
+  const skewedHourlyMap = Object.fromEntries(
+    Array.from({ length: 24 }, (_, h) => [h, h === 6 ? 60 : 2])
+  );
+  const skewedHourlyCounts = Object.values(skewedHourlyMap).reduce((a, b) => a + b, 0);
+
+  test('changing israelHour changes the hourlyFactor', () => {
+    const atPeak   = computePrediction({ ...BASE, hourlyMap: skewedHourlyMap, totalHourlyCounts: skewedHourlyCounts, israelHour: 6  });
+    const atOff    = computePrediction({ ...BASE, hourlyMap: skewedHourlyMap, totalHourlyCounts: skewedHourlyCounts, israelHour: 18 });
+    expect(atPeak.factors.hourlyFactor).toBeGreaterThan(atOff.factors.hourlyFactor);
+  });
+
+  test('probability at the peak hour is higher than at an off-peak hour', () => {
+    const atPeak = computePrediction({ ...BASE, hourlyMap: skewedHourlyMap, totalHourlyCounts: skewedHourlyCounts, israelHour: 6  });
+    const atOff  = computePrediction({ ...BASE, hourlyMap: skewedHourlyMap, totalHourlyCounts: skewedHourlyCounts, israelHour: 18 });
+    expect(atPeak.probability).toBeGreaterThan(atOff.probability);
+  });
+
+  test('momentum decays as we project further into the future (larger offset)', () => {
+    const lastAlertTs = new Date().toISOString(); // just now
+
+    // Simulate offset-0 (now) vs offset-3 (3h later) by shifting lastAlertTs back
+    const offset0 = computePrediction({ ...BASE, lastAlertTs });
+    const offset3 = computePrediction({
+      ...BASE,
+      lastAlertTs: new Date(new Date(lastAlertTs).getTime() - 3 * 3_600_000).toISOString(),
+    });
+
+    expect(offset0.factors.momentumScore).toBeGreaterThan(offset3.factors.momentumScore);
+  });
+
+  test('at offset=0 probability >= offset=3 probability when alert just happened', () => {
+    const lastAlertTs = new Date().toISOString();
+    const now = computePrediction({ ...BASE, lastAlertTs });
+    const future = computePrediction({
+      ...BASE,
+      lastAlertTs: new Date(new Date(lastAlertTs).getTime() - 3 * 3_600_000).toISOString(),
+    });
+    // Probability should be equal or higher at offset 0 due to stronger momentum.
+    expect(now.probability).toBeGreaterThanOrEqual(future.probability);
+  });
+});

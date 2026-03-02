@@ -44,3 +44,11 @@ export async function fetchPrediction(area) {
   const { data } = await api.get(`/api/areas/${encodeURIComponent(area)}/prediction`);
   return data;
 }
+
+export async function fetchPredictionTimeline(area, hours = 12) {
+  const { data } = await api.get(
+    `/api/areas/${encodeURIComponent(area)}/prediction/timeline`,
+    { params: { hours } }
+  );
+  return data;
+}

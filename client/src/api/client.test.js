@@ -16,6 +16,7 @@ import {
   fetchAllAreas,
   fetchStatus,
   fetchPrediction,
+  fetchPredictionTimeline,
 } from './client.js';
 
 beforeEach(() => {
@@ -150,5 +151,31 @@ describe('fetchPrediction  (RESTful path param)', () => {
     mockGet.mockResolvedValue({ data: prediction });
     const result = await fetchPrediction('אשקלון');
     expect(result).toEqual(prediction);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('fetchPredictionTimeline  (RESTful path param)', () => {
+  test('calls the timeline endpoint with default hours=12', async () => {
+    await fetchPredictionTimeline('תל אביב');
+    expect(mockGet).toHaveBeenCalledWith(
+      `/api/areas/${encodeURIComponent('תל אביב')}/prediction/timeline`,
+      { params: { hours: 12 } }
+    );
+  });
+
+  test('passes custom hours param', async () => {
+    await fetchPredictionTimeline('אשקלון', 6);
+    expect(mockGet).toHaveBeenCalledWith(
+      `/api/areas/${encodeURIComponent('אשקלון')}/prediction/timeline`,
+      { params: { hours: 6 } }
+    );
+  });
+
+  test('returns timeline data from the response', async () => {
+    const timeline = { area: 'אשקלון', currentHour: 14, predictions: [] };
+    mockGet.mockResolvedValue({ data: timeline });
+    const result = await fetchPredictionTimeline('אשקלון');
+    expect(result).toEqual(timeline);
   });
 });
