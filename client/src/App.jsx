@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import MapView from './components/Map';
 import Sidebar from './components/Sidebar';
 import { fetchAreas, fetchSummary, fetchAllAreas, fetchStatus } from './api/client';
@@ -94,19 +94,32 @@ export default function App() {
   // Merge static area list (allAreas) with alert counts (alertAreas), keyed by area_name_he.
   // Known areas with no alerts → shown as 0-count circles.
   // oref sub-areas not in areas.json but with alerts → added as extras.
-  const alertAreaMap = new Map(alertAreas.map((a) => [a.area_name_he, a]));
-  const allAreaSet = new Set(allAreas.map((a) => a.area_name_he));
+  // Memoized to prevent expensive recalculation on every render.
+  const mergedAreas = useMemo(() => {
+    const alertAreaMap = new Map(alertAreas.map((a) => [a.area_name_he, a]));
+    const allAreaSet = new Set(allAreas.map((a) => a.area_name_he));
 
-  const mergedKnown = allAreas.map((a) =>
-    alertAreaMap.get(a.area_name_he) ?? { ...a, alert_count: 0, dominant_category: 0, dominant_category_desc: 'No alerts' }
-  );
-  const extras = alertAreas.filter((a) => !allAreaSet.has(a.area_name_he));
-  const mergedAreas = [...mergedKnown, ...extras];
+    const mergedKnown = allAreas.map((a) =>
+      alertAreaMap.get(a.area_name_he) ?? {
+        ...a,
+        alert_count: 0,
+        dominant_category: 0,
+        dominant_category_desc: 'No alerts',
+      }
+    );
+    const extras = alertAreas.filter((a) => !allAreaSet.has(a.area_name_he));
+    return [...mergedKnown, ...extras];
+  }, [allAreas, alertAreas]);
 
   // Derive English display names for selected and favourite areas
-  const areaLabelMap = new Map(mergedAreas.map((a) => [a.area_name_he, a.area_name]));
-  const selectedAreaLabel = selectedArea ? (areaLabelMap.get(selectedArea) ?? selectedArea) : null;
-  const favoriteAreaLabel = favoriteArea ? (areaLabelMap.get(favoriteArea) ?? favoriteArea) : null;
+  // Memoized separately since it depends on mergedAreas + selectedArea/favoriteArea
+  const { selectedAreaLabel, favoriteAreaLabel } = useMemo(() => {
+    const areaLabelMap = new Map(mergedAreas.map((a) => [a.area_name_he, a.area_name]));
+    return {
+      selectedAreaLabel: selectedArea ? (areaLabelMap.get(selectedArea) ?? selectedArea) : null,
+      favoriteAreaLabel: favoriteArea ? (areaLabelMap.get(favoriteArea) ?? favoriteArea) : null,
+    };
+  }, [mergedAreas, selectedArea, favoriteArea]);
 
   return (
     <div className="app-layout" style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f0f1a' }}>

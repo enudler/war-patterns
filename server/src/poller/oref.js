@@ -127,8 +127,28 @@ async function poll() {
 
 function startPoller(intervalMs = 15000) {
   console.log(`[poller] Starting — interval ${intervalMs}ms`);
-  poll().catch(console.error);
-  setInterval(() => poll().catch(console.error), intervalMs);
+
+  // Safe polling wrapper with explicit error handling
+  const safePoll = async () => {
+    try {
+      await poll();
+    } catch (err) {
+      console.error('[poller] Error during poll cycle:', err.message, err.stack);
+      // Continue polling even after errors - don't let one failure stop the poller
+    }
+  };
+
+  // Initial poll
+  safePoll();
+
+  // Set up recurring polls
+  const intervalId = setInterval(safePoll, intervalMs);
+
+  // Return cleanup function (useful for graceful shutdown)
+  return () => {
+    console.log('[poller] Stopping');
+    clearInterval(intervalId);
+  };
 }
 
 module.exports = { startPoller };

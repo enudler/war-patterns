@@ -33,6 +33,20 @@ async function migrate() {
         ON alerts(category);
     `);
 
+    // Index for Hebrew area name queries (used in all area-specific endpoints)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS alerts_area_name_he
+        ON alerts(area_name_he);
+    `);
+
+    // Composite index for common query pattern: area + time + category filter
+    // Supports queries with LIKE 'base - %' pattern and category IN (1, 2)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS alerts_area_he_alerted_category
+        ON alerts(area_name_he, alerted_at DESC, category)
+        WHERE category IN (1, 2);
+    `);
+
     console.log('[migrate] Schema ready.');
   } finally {
     client.release();

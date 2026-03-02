@@ -21,21 +21,45 @@ function radiusForCount(count) {
   return 28;
 }
 
-// Pans map to fit all markers on first load
+// Pans map to fit all markers on first load or when areas with alerts change significantly
 function AutoFit({ areas }) {
   const map = useMap();
   const fitted = useRef(false);
+  const lastBoundsRef = useRef(null);
 
   useEffect(() => {
-    if (areas.length === 0 || fitted.current) return;
-    const lats = areas.filter((a) => a.lat).map((a) => parseFloat(a.lat));
-    const lons = areas.filter((a) => a.lon).map((a) => parseFloat(a.lon));
-    if (lats.length === 0) return;
-    map.fitBounds([
-      [Math.min(...lats) - 0.5, Math.min(...lons) - 0.5],
-      [Math.max(...lats) + 0.5, Math.max(...lons) + 0.5],
-    ], { padding: [20, 20] });
-    fitted.current = true;
+    if (areas.length === 0) return;
+
+    const areasWithCoords = areas.filter((a) => a.lat && a.lon);
+    if (areasWithCoords.length === 0) return;
+
+    const lats = areasWithCoords.map((a) => parseFloat(a.lat));
+    const lons = areasWithCoords.map((a) => parseFloat(a.lon));
+
+    const bounds = {
+      minLat: Math.min(...lats),
+      maxLat: Math.max(...lats),
+      minLon: Math.min(...lons),
+      maxLon: Math.max(...lons),
+    };
+
+    // Re-fit if this is the first time OR if bounds changed significantly (>20%)
+    const shouldFit = !fitted.current || (lastBoundsRef.current && (
+      Math.abs(bounds.minLat - lastBoundsRef.current.minLat) > 0.5 ||
+      Math.abs(bounds.maxLat - lastBoundsRef.current.maxLat) > 0.5 ||
+      Math.abs(bounds.minLon - lastBoundsRef.current.minLon) > 0.5 ||
+      Math.abs(bounds.maxLon - lastBoundsRef.current.maxLon) > 0.5
+    ));
+
+    if (shouldFit) {
+      map.fitBounds([
+        [bounds.minLat - 0.5, bounds.minLon - 0.5],
+        [bounds.maxLat + 0.5, bounds.maxLon + 0.5],
+      ], { padding: [20, 20] });
+
+      lastBoundsRef.current = bounds;
+      fitted.current = true;
+    }
   }, [areas, map]);
 
   return null;

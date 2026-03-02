@@ -317,22 +317,42 @@ export default function PredictionGauge({ area }) {
   const [selectedOffset, setSelectedOffset] = useState(0);
 
   useEffect(() => {
-    if (!area) { setTimeline(null); return; }
+    if (!area) {
+      setTimeline(null);
+      return;
+    }
+
+    let mounted = true;
+
+    const loadPrediction = async () => {
+      if (!mounted) return;
+
+      try {
+        const data = await fetchPredictionTimeline(area, 12);
+        if (mounted) setTimeline(data);
+      } catch (err) {
+        if (mounted) setError(err.message);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
     setLoading(true);
     setError(null);
     setSelectedOffset(0);
+    loadPrediction();
 
-    const load = () =>
-      fetchPredictionTimeline(area, 12)
-        .then((data) => setTimeline(data))
-        .catch((err) => setError(err.message));
-
-    load().finally(() => setLoading(false));
-
+    // Refresh prediction every 60 seconds
     const id = setInterval(() => {
-      fetchPredictionTimeline(area, 12).then((data) => setTimeline(data)).catch(() => {});
+      if (mounted) {
+        loadPrediction().catch(() => {});
+      }
     }, 60_000);
-    return () => clearInterval(id);
+
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
   }, [area]);
 
   if (!area) return null;

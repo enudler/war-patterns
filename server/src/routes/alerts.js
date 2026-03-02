@@ -7,6 +7,63 @@ const router = express.Router();
 // Only include Rocket/Missile (1) and UAV/Drone (2) categories
 const EXCLUDE_FILTER = `category IN (1, 2)`;
 
+// Helper to sanitize error messages in production
+function sanitizeError(err) {
+  const message = process.env.NODE_ENV === 'production'
+    ? 'Internal server error'
+    : err.message;
+  return { error: message };
+}
+
+// Validate area parameter to prevent injection and provide better error messages
+function validateAreaParam(req, res, next) {
+  const area = req.params.area;
+
+  if (!area || typeof area !== 'string') {
+    return res.status(400).json({ error: 'Area parameter is required' });
+  }
+
+  if (area.length > 100) {
+    return res.status(400).json({ error: 'Area parameter too long' });
+  }
+
+  // Basic validation: Hebrew characters, ASCII letters/numbers, spaces, hyphens, and common punctuation
+  // This allows legitimate area names while blocking obvious injection attempts (SQL, XSS)
+  const validPattern = /^[\u0590-\u05FFa-zA-Z0-9\s\-,'".()]+$/;
+  if (!validPattern.test(area)) {
+    return res.status(400).json({ error: 'Invalid area parameter format' });
+  }
+
+  next();
+}
+
+// Generate deduplication CTE for area-specific queries.
+// Uses 3-minute bucketing to collapse sibling sub-areas and polling duplicates.
+function dedupCte(predFilter) {
+  return `
+    WITH deduped AS (
+      SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
+        alerted_at
+      FROM alerts
+      WHERE ${predFilter}
+      ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01'), category
+    )
+  `;
+}
+
+// Generate full deduplication CTE for stats queries (includes more columns).
+function dedupCteWithColumns(predFilter) {
+  return `
+    WITH deduped AS (
+      SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
+        alerted_at, category, category_desc
+      FROM alerts
+      WHERE ${predFilter}
+      ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01'), category
+    )
+  `;
+}
+
 // Extract the parent city name from an oref sub-area identifier.
 // "אשקלון - דרום" → "אשקלון"
 // "אשקלון"         → "אשקלון"
@@ -104,15 +161,15 @@ router.get('/areas', async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    console.error('[/areas]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[/areas]', err.message, err.stack);
+    res.status(500).json(sanitizeError(err));
   }
 });
 
 // GET /api/areas/:area/alerts?days=N  or  ?today=1
 // :area is the Hebrew area_name_he, URL-encoded in the path.
 // Matches the selected area + parent + sibling subdivisions.
-router.get('/areas/:area/alerts', async (req, res) => {
+router.get('/areas/:area/alerts', validateAreaParam, async (req, res) => {
   const area = req.params.area;
   const tc = timeClause(req.query, 3);
   try {
@@ -133,15 +190,15 @@ router.get('/areas/:area/alerts', async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    console.error('[/alerts]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[/alerts]', err.message, err.stack);
+    res.status(500).json(sanitizeError(err));
   }
 });
 
 // GET /api/areas/:area/stats?days=N  or  ?today=1
 // :area is the Hebrew area_name_he, URL-encoded in the path.
 // Matches the selected area + parent + sibling subdivisions.
-router.get('/areas/:area/stats', async (req, res) => {
+router.get('/areas/:area/stats', validateAreaParam, async (req, res) => {
   const area = req.params.area;
   const tc = timeClause(req.query, 3);
   const qParams = [...areaParams(area), ...tc.params];
@@ -150,22 +207,13 @@ router.get('/areas/:area/stats', async (req, res) => {
   // sub-areas AND near-duplicate rows from the poller (which can record the
   // same active alert every ~15 s across minute boundaries) so chart counts
   // reflect unique events.
-  const dedupCte = `
-    WITH deduped AS (
-      SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
-        alerted_at, category, category_desc
-      FROM alerts
-      WHERE ${areaClause(1)}
-        AND ${tc.clause}
-        AND ${EXCLUDE_FILTER}
-      ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01'), category
-    )
-  `;
+  const dedupFilter = `${areaClause(1)} AND ${tc.clause} AND ${EXCLUDE_FILTER}`;
+  const dedupSql = dedupCteWithColumns(dedupFilter);
 
   try {
     const [byType, byDay, byHour, totalResult] = await Promise.all([
       pool.query(
-        `${dedupCte}
+        `${dedupSql}
          SELECT category, category_desc, COUNT(*) AS count
          FROM deduped
          GROUP BY category, category_desc
@@ -173,7 +221,7 @@ router.get('/areas/:area/stats', async (req, res) => {
         qParams
       ),
       pool.query(
-        `${dedupCte}
+        `${dedupSql}
          SELECT DATE(alerted_at AT TIME ZONE 'Asia/Jerusalem') AS date, COUNT(*) AS count
          FROM deduped
          GROUP BY date
@@ -181,7 +229,7 @@ router.get('/areas/:area/stats', async (req, res) => {
         qParams
       ),
       pool.query(
-        `${dedupCte}
+        `${dedupSql}
          SELECT EXTRACT(HOUR FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS hour,
                 COUNT(*) AS count
          FROM deduped
@@ -190,7 +238,7 @@ router.get('/areas/:area/stats', async (req, res) => {
         qParams
       ),
       pool.query(
-        `${dedupCte}
+        `${dedupSql}
          SELECT COUNT(*) AS total FROM deduped`,
         qParams
       ),
@@ -209,8 +257,8 @@ router.get('/areas/:area/stats', async (req, res) => {
       byHour: byHour.rows.map((r) => ({ hour: r.hour, count: parseInt(r.count, 10) })),
     });
   } catch (err) {
-    console.error('[/stats]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[/stats]', err.message, err.stack);
+    res.status(500).json(sanitizeError(err));
   }
 });
 
@@ -240,8 +288,8 @@ router.get('/summary', async (req, res) => {
       })),
     });
   } catch (err) {
-    console.error('[/summary]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[/summary]', err.message, err.stack);
+    res.status(500).json(sanitizeError(err));
   }
 });
 
@@ -379,58 +427,63 @@ function computePrediction({
 //   3. Trend       — last-24 h alert rate vs overall rate
 //   4. Momentum    — exponential decay from time since last alert
 //   5. Day-of-week — current weekday's frequency vs average
-router.get('/areas/:area/prediction', async (req, res) => {
+router.get('/areas/:area/prediction', validateAreaParam, async (req, res) => {
   const area = req.params.area;
 
   try {
     const predFilter = `${areaClause(1)} AND ${EXCLUDE_FILTER}`;
     const predParams = areaParams(area);
 
+    // Deduplicate using 3-minute bucketing to collapse sibling sub-areas and
+    // near-duplicate polling rows into one alert per bucket+category, matching
+    // the deduplication logic in /api/areas/:area/stats.
+    const predDedupSql = dedupCte(predFilter);
+
     const [observationResult, hourlyResult, last24hResult, lastAlertResult, dowResult] =
       await Promise.all([
         // 1. Observation window
         pool.query(
-          `SELECT
+          `${predDedupSql}
+           SELECT
              COUNT(*) AS total_alerts,
              COUNT(DISTINCT DATE_TRUNC('hour', alerted_at AT TIME ZONE 'Asia/Jerusalem')) AS hours_with_alerts,
              EXTRACT(EPOCH FROM (MAX(alerted_at) - MIN(alerted_at))) / 3600.0 AS observation_hours
-           FROM alerts
-           WHERE ${predFilter}`,
+           FROM deduped`,
           predParams
         ),
         // 2. Hourly pattern (alerts per hour-of-day)
         pool.query(
-          `SELECT
+          `${predDedupSql}
+           SELECT
              EXTRACT(HOUR FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS hour,
              COUNT(*) AS count
-           FROM alerts
-           WHERE ${predFilter}
+           FROM deduped
            GROUP BY hour
            ORDER BY hour`,
           predParams
         ),
         // 3. Alerts in last 24 hours
         pool.query(
-          `SELECT COUNT(*) AS count
-           FROM alerts
-           WHERE ${predFilter}
-             AND alerted_at >= NOW() - INTERVAL '24 hours'`,
+          `${predDedupSql}
+           SELECT COUNT(*) AS count
+           FROM deduped
+           WHERE alerted_at >= NOW() - INTERVAL '24 hours'`,
           predParams
         ),
         // 4. Most recent alert
         pool.query(
-          `SELECT MAX(alerted_at) AS last_alert
-           FROM alerts
-           WHERE ${predFilter}`,
+          `${predDedupSql}
+           SELECT MAX(alerted_at) AS last_alert
+           FROM deduped`,
           predParams
         ),
         // 5. Day-of-week pattern
         pool.query(
-          `SELECT
+          `${predDedupSql}
+           SELECT
              EXTRACT(DOW FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS dow,
              COUNT(*) AS count
-           FROM alerts
-           WHERE ${predFilter}
+           FROM deduped
            GROUP BY dow
            ORDER BY dow`,
           predParams
@@ -460,11 +513,7 @@ router.get('/areas/:area/prediction', async (req, res) => {
     }
 
     // Israel-time hour & weekday (UTC offset + DST approximation)
-    const now          = new Date();
-    const israelOffset = 2;
-    const dstShift     = isDST(now) ? 1 : 0;
-    const israelHour   = (now.getUTCHours() + israelOffset + dstShift) % 24;
-    const israelDay    = new Date(now.getTime() + (israelOffset + dstShift) * 3_600_000).getUTCDay();
+    const { israelHour, israelDay } = getIsraelTime();
 
     const prediction = computePrediction({
       totalAlerts, hoursWithAlerts, observationHours,
@@ -476,8 +525,8 @@ router.get('/areas/:area/prediction', async (req, res) => {
 
     res.json({ area, ...prediction });
   } catch (err) {
-    console.error('[/prediction]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[/prediction]', err.message, err.stack);
+    res.status(500).json(sanitizeError(err));
   }
 });
 
@@ -486,7 +535,7 @@ router.get('/areas/:area/prediction', async (req, res) => {
 // Reuses the same 5 DB queries as /prediction but calls computePrediction once
 // per hour — no extra DB round-trips needed since hourlyMap/dowMap already hold
 // all 24-hour and 7-day pattern data.
-router.get('/areas/:area/prediction/timeline', async (req, res) => {
+router.get('/areas/:area/prediction/timeline', validateAreaParam, async (req, res) => {
   const area = req.params.area;
   const numHours = Math.min(Math.max(parseInt(req.query.hours || '12', 10), 1), 24);
 
@@ -494,46 +543,48 @@ router.get('/areas/:area/prediction/timeline', async (req, res) => {
     const predFilter = `${areaClause(1)} AND ${EXCLUDE_FILTER}`;
     const predParams = areaParams(area);
 
+    const timelineDedupSql = dedupCte(predFilter);
+
     const [observationResult, hourlyResult, last24hResult, lastAlertResult, dowResult] =
       await Promise.all([
         pool.query(
-          `SELECT
+          `${timelineDedupSql}
+           SELECT
              COUNT(*) AS total_alerts,
              COUNT(DISTINCT DATE_TRUNC('hour', alerted_at AT TIME ZONE 'Asia/Jerusalem')) AS hours_with_alerts,
              EXTRACT(EPOCH FROM (MAX(alerted_at) - MIN(alerted_at))) / 3600.0 AS observation_hours
-           FROM alerts
-           WHERE ${predFilter}`,
+           FROM deduped`,
           predParams
         ),
         pool.query(
-          `SELECT
+          `${timelineDedupSql}
+           SELECT
              EXTRACT(HOUR FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS hour,
              COUNT(*) AS count
-           FROM alerts
-           WHERE ${predFilter}
+           FROM deduped
            GROUP BY hour
            ORDER BY hour`,
           predParams
         ),
         pool.query(
-          `SELECT COUNT(*) AS count
-           FROM alerts
-           WHERE ${predFilter}
-             AND alerted_at >= NOW() - INTERVAL '24 hours'`,
+          `${timelineDedupSql}
+           SELECT COUNT(*) AS count
+           FROM deduped
+           WHERE alerted_at >= NOW() - INTERVAL '24 hours'`,
           predParams
         ),
         pool.query(
-          `SELECT MAX(alerted_at) AS last_alert
-           FROM alerts
-           WHERE ${predFilter}`,
+          `${timelineDedupSql}
+           SELECT MAX(alerted_at) AS last_alert
+           FROM deduped`,
           predParams
         ),
         pool.query(
-          `SELECT
+          `${timelineDedupSql}
+           SELECT
              EXTRACT(DOW FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS dow,
              COUNT(*) AS count
-           FROM alerts
-           WHERE ${predFilter}
+           FROM deduped
            GROUP BY dow
            ORDER BY dow`,
           predParams
@@ -562,11 +613,7 @@ router.get('/areas/:area/prediction/timeline', async (req, res) => {
       totalDowCounts  += parseInt(row.count, 10);
     }
 
-    const now          = new Date();
-    const israelOffset = 2;
-    const dstShift     = isDST(now) ? 1 : 0;
-    const israelHour   = (now.getUTCHours() + israelOffset + dstShift) % 24;
-    const israelDay    = new Date(now.getTime() + (israelOffset + dstShift) * 3_600_000).getUTCDay();
+    const { israelHour, israelDay } = getIsraelTime();
 
     // Generate one prediction per future hour offset.
     // For offset h: advance the target hour/day and decay momentum as if h
@@ -606,8 +653,8 @@ router.get('/areas/:area/prediction/timeline', async (req, res) => {
 
     res.json({ area, currentHour: israelHour, predictions });
   } catch (err) {
-    console.error('[/prediction/timeline]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[/prediction/timeline]', err.message, err.stack);
+    res.status(500).json(sanitizeError(err));
   }
 });
 
@@ -626,6 +673,16 @@ function isDST(date) {
   return date.getUTCDate() < lastSun;
 }
 
+// Calculate current Israel time (hour and day of week).
+// Uses UTC+2 base offset plus DST adjustment (UTC+3 during summer).
+function getIsraelTime(now = new Date()) {
+  const israelOffset = 2;
+  const dstShift = isDST(now) ? 1 : 0;
+  const israelHour = (now.getUTCHours() + israelOffset + dstShift) % 24;
+  const israelDay = new Date(now.getTime() + (israelOffset + dstShift) * 3_600_000).getUTCDay();
+  return { israelHour, israelDay };
+}
+
 // GET /api/status — data collection range
 router.get('/status', async (_req, res) => {
   try {
@@ -637,9 +694,10 @@ router.get('/status', async (_req, res) => {
       newest: result.rows[0]?.newest || null,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[/status]', err.message, err.stack);
+    res.status(500).json(sanitizeError(err));
   }
 });
 
 module.exports = router;
-module.exports._test = { baseAreaName, areaParams, timeClause, isDST, computePrediction };
+module.exports._test = { baseAreaName, areaParams, timeClause, isDST, getIsraelTime, computePrediction };
