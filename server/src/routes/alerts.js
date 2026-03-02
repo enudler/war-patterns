@@ -194,6 +194,195 @@ router.get('/summary', async (req, res) => {
   }
 });
 
+// GET /api/prediction?area=<area_name_he>
+// Multi-factor probability model for attack in the next hour.
+//
+// Factors combined via log-odds (logistic) approach:
+//   1. Base rate   — fraction of hour-slots with ≥1 alert
+//   2. Hour-of-day — current hour's historical frequency vs average
+//   3. Trend       — last-24 h alert rate vs overall rate
+//   4. Momentum    — exponential decay from time since last alert
+//   5. Day-of-week — current weekday's frequency vs average
+router.get('/prediction', async (req, res) => {
+  const area = req.query.area;
+  if (!area) return res.status(400).json({ error: 'area param required' });
+
+  try {
+    const baseFilter = `area_name_he = $1 AND ${EXCLUDE_FILTER}`;
+
+    const [observationResult, hourlyResult, last24hResult, lastAlertResult, dowResult] =
+      await Promise.all([
+        // 1. Observation window
+        pool.query(
+          `SELECT
+             COUNT(*) AS total_alerts,
+             COUNT(DISTINCT DATE_TRUNC('hour', alerted_at AT TIME ZONE 'Asia/Jerusalem')) AS hours_with_alerts,
+             EXTRACT(EPOCH FROM (MAX(alerted_at) - MIN(alerted_at))) / 3600.0 AS observation_hours
+           FROM alerts
+           WHERE ${baseFilter}`,
+          [area]
+        ),
+        // 2. Hourly pattern (alerts per hour-of-day)
+        pool.query(
+          `SELECT
+             EXTRACT(HOUR FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS hour,
+             COUNT(*) AS count
+           FROM alerts
+           WHERE ${baseFilter}
+           GROUP BY hour
+           ORDER BY hour`,
+          [area]
+        ),
+        // 3. Alerts in last 24 hours
+        pool.query(
+          `SELECT COUNT(*) AS count
+           FROM alerts
+           WHERE ${baseFilter}
+             AND alerted_at >= NOW() - INTERVAL '24 hours'`,
+          [area]
+        ),
+        // 4. Most recent alert
+        pool.query(
+          `SELECT MAX(alerted_at) AS last_alert
+           FROM alerts
+           WHERE ${baseFilter}`,
+          [area]
+        ),
+        // 5. Day-of-week pattern
+        pool.query(
+          `SELECT
+             EXTRACT(DOW FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS dow,
+             COUNT(*) AS count
+           FROM alerts
+           WHERE ${baseFilter}
+           GROUP BY dow
+           ORDER BY dow`,
+          [area]
+        ),
+      ]);
+
+    const obs = observationResult.rows[0];
+    const totalAlerts = parseInt(obs.total_alerts, 10);
+    const hoursWithAlerts = parseInt(obs.hours_with_alerts, 10);
+    const observationHours = parseFloat(obs.observation_hours) || 0;
+
+    // No history at all → probability 0
+    if (totalAlerts === 0) {
+      return res.json({
+        area,
+        probability: 0,
+        riskLevel: 'none',
+        factors: { baseRate: 0, hourlyFactor: 1, trendFactor: 1, momentumScore: 0, dowFactor: 1 },
+        meta: { totalAlerts: 0, observationHours: 0, hoursSinceLastAlert: null, alertsLast24h: 0, currentHour: null },
+      });
+    }
+
+    // Israel-time hour & weekday (derive via UTC offset to avoid locale issues on server)
+    const now = new Date();
+    const israelOffset = 2; // Israel Standard Time +2 (approximation; ±1 h for DST is acceptable)
+    const israelHour = (now.getUTCHours() + israelOffset + (isDST(now) ? 1 : 0)) % 24;
+    const israelDay  = new Date(now.getTime() + (israelOffset + (isDST(now) ? 1 : 0)) * 3_600_000).getUTCDay();
+
+    // --- Factor 1: Base Rate ---
+    const totalHourSlots = Math.max(observationHours, 24);
+    const baseRate = Math.min(hoursWithAlerts / totalHourSlots, 0.99);
+
+    // --- Factor 2: Hour-of-Day ---
+    const hourlyMap = {};
+    let totalHourlyCounts = 0;
+    for (const row of hourlyResult.rows) {
+      hourlyMap[row.hour] = parseInt(row.count, 10);
+      totalHourlyCounts += parseInt(row.count, 10);
+    }
+    const avgPerHour = totalHourlyCounts / 24;
+    const currentHourCount = hourlyMap[israelHour] || 0;
+    const hourlyFactor = avgPerHour > 0 ? currentHourCount / avgPerHour : 1;
+
+    // --- Factor 3: Trend (24 h vs overall) ---
+    const alertsLast24h = parseInt(last24hResult.rows[0].count, 10);
+    const overallRate = totalAlerts / Math.max(observationHours, 1);
+    const recentRate = alertsLast24h / 24;
+    const trendFactor = overallRate > 0 ? recentRate / overallRate : 1;
+
+    // --- Factor 4: Momentum (recency) ---
+    const lastAlertTs = lastAlertResult.rows[0].last_alert;
+    const hoursSinceLastAlert = lastAlertTs
+      ? (Date.now() - new Date(lastAlertTs).getTime()) / 3_600_000
+      : Infinity;
+    const decayLambda = 0.5; // ~50 % per 1.4 h
+    const momentumScore = hoursSinceLastAlert === Infinity ? 0 : Math.exp(-decayLambda * hoursSinceLastAlert);
+
+    // --- Factor 5: Day-of-Week ---
+    const dowMap = {};
+    let totalDowCounts = 0;
+    for (const row of dowResult.rows) {
+      dowMap[row.dow] = parseInt(row.count, 10);
+      totalDowCounts += parseInt(row.count, 10);
+    }
+    const avgPerDow = totalDowCounts / 7;
+    const currentDowCount = dowMap[israelDay] || 0;
+    const dowFactor = avgPerDow > 0 ? currentDowCount / avgPerDow : 1;
+
+    // --- Combine via log-odds ---
+    const clampedBase = Math.max(0.005, Math.min(0.995, baseRate));
+    let logit = Math.log(clampedBase / (1 - clampedBase));
+
+    const safeLog = (x) => Math.log(Math.max(x, 0.01));
+    logit += 0.6 * safeLog(hourlyFactor);
+    logit += 0.4 * safeLog(trendFactor);
+    logit += 0.3 * safeLog(dowFactor);
+    logit += 2.0 * momentumScore; // additive boost
+
+    const probability = 1 / (1 + Math.exp(-logit));
+
+    let riskLevel;
+    if (probability < 0.05)      riskLevel = 'very_low';
+    else if (probability < 0.15) riskLevel = 'low';
+    else if (probability < 0.35) riskLevel = 'moderate';
+    else if (probability < 0.60) riskLevel = 'high';
+    else if (probability < 0.80) riskLevel = 'very_high';
+    else                         riskLevel = 'critical';
+
+    res.json({
+      area,
+      probability: Math.round(probability * 1000) / 1000,
+      riskLevel,
+      factors: {
+        baseRate:      Math.round(baseRate * 1000) / 1000,
+        hourlyFactor:  Math.round(hourlyFactor * 100) / 100,
+        trendFactor:   Math.round(trendFactor * 100) / 100,
+        momentumScore: Math.round(momentumScore * 1000) / 1000,
+        dowFactor:     Math.round(dowFactor * 100) / 100,
+      },
+      meta: {
+        totalAlerts,
+        observationHours: Math.round(observationHours * 10) / 10,
+        hoursSinceLastAlert: hoursSinceLastAlert === Infinity ? null : Math.round(hoursSinceLastAlert * 10) / 10,
+        alertsLast24h,
+        currentHour: israelHour,
+      },
+    });
+  } catch (err) {
+    console.error('[/prediction]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rough Israel DST check (last-Friday-in-March to last-Sunday-in-October)
+function isDST(date) {
+  const month = date.getUTCMonth(); // 0-based
+  if (month > 2 && month < 9) return true;  // Apr–Sep always DST
+  if (month < 2 || month > 9) return false;  // Nov–Feb never DST
+  // March: DST starts last Friday at 02:00
+  if (month === 2) {
+    const lastFri = 31 - ((new Date(Date.UTC(date.getUTCFullYear(), 2, 31)).getUTCDay() + 2) % 7);
+    return date.getUTCDate() >= lastFri;
+  }
+  // October: DST ends last Sunday at 02:00
+  const lastSun = 31 - new Date(Date.UTC(date.getUTCFullYear(), 9, 31)).getUTCDay();
+  return date.getUTCDate() < lastSun;
+}
+
 // GET /api/status — data collection range
 router.get('/status', async (_req, res) => {
   try {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchStats, fetchAlerts } from '../api/client';
 import { DailyBarChart, HourlyBarChart, TypePieChart } from './Charts';
+import PredictionGauge from './PredictionGauge';
 
 const DAY_OPTIONS = [
   { value: 'today', label: 'Today' },
@@ -219,6 +220,9 @@ export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea,
       {selectedArea && error && (
         <div style={{ padding: 20, color: '#ef4444', fontSize: 13 }}>{error}</div>
       )}
+
+      {/* Prediction Gauge — always visible when area selected (independent of stats loading) */}
+      {selectedArea && <PredictionGauge area={selectedArea} />}
 
       {selectedArea && stats && !loading && (
         <>
