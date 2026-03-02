@@ -66,7 +66,7 @@ function Gauge({ probability, riskLevel }) {
   const gradientId = 'gaugeGrad';
 
   return (
-    <svg viewBox="0 0 200 110" width="100%" style={{ maxWidth: 240, display: 'block', margin: '0 auto' }}>
+    <svg viewBox="0 0 200 110" width="100%" style={{ maxWidth: 220, display: 'block', margin: '0 auto' }}>
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%" stopColor="#22c55e" />

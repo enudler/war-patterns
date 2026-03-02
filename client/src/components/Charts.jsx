@@ -6,11 +6,6 @@ import {
 const TYPE_COLORS = {
   'Rocket / Missile': '#ef4444',
   'UAV / Drone': '#f97316',
-  'Earthquake': '#8b5cf6',
-  'Hostile Aircraft': '#ec4899',
-  'Unconventional Missile': '#dc2626',
-  'Infrastructure Hazard': '#10b981',
-  'Unknown': '#6b7280',
 };
 
 function typeColor(desc) {

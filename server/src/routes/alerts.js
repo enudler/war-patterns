@@ -4,8 +4,8 @@ const areasData = require('../data/areas.json');
 
 const router = express.Router();
 
-// Exclude non-threat categories from all queries
-const EXCLUDE_FILTER = `category != 13 AND category_desc NOT LIKE 'Unknown%'`;
+// Only include Rocket/Missile (1) and UAV/Drone (2) categories
+const EXCLUDE_FILTER = `category IN (1, 2)`;
 
 // GET /api/areas/all — all known areas with coords (no DB needed)
 router.get('/areas/all', (_req, res) => {
