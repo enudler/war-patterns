@@ -7,6 +7,18 @@ const router = express.Router();
 // Only include Rocket/Missile (1) and UAV/Drone (2) categories
 const EXCLUDE_FILTER = `category IN (1, 2)`;
 
+// Match an area and all sibling subdivisions sharing the same base name.
+// "אשקלון - דרום" → matches "אשקלון", "אשקלון - דרום", "אשקלון - צפון", etc.
+// "אשקלון"         → matches "אשקלון", "אשקלון - דרום", "אשקלון - צפון", etc.
+// Returns { clause, params, paramCount } for use in WHERE.
+function areaClause(paramBase) {
+  return `(area_name_he = $${paramBase} OR area_name_he LIKE $${paramBase + 1})`;
+}
+function areaParams(area) {
+  const baseName = area.replace(/ - .*$/, '').trim();
+  return [baseName, `${baseName} - %`];
+}
+
 // GET /api/areas/all — all known areas with coords (no DB needed)
 router.get('/areas/all', (_req, res) => {
   const result = Object.entries(areasData).map(([name_he, v]) => ({
@@ -70,21 +82,21 @@ router.get('/areas', async (req, res) => {
 });
 
 // GET /api/alerts?area=<area_name_he>&days=N  or  ?area=<area_name_he>&today=1
-// area param is the Hebrew sub-area name (area_name_he).
+// Matches the selected area + parent + sibling subdivisions.
 router.get('/alerts', async (req, res) => {
   const area = req.query.area;
   if (!area) return res.status(400).json({ error: 'area param required' });
-  const tc = timeClause(req.query, 2);
+  const tc = timeClause(req.query, 3);
   try {
     const result = await pool.query(
       `SELECT id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
        FROM alerts
-       WHERE area_name_he = $1
+       WHERE ${areaClause(1)}
          AND ${tc.clause}
          AND ${EXCLUDE_FILTER}
        ORDER BY alerted_at DESC
        LIMIT 100`,
-      [area, ...tc.params]
+      [...areaParams(area), ...tc.params]
     );
     res.json(result.rows);
   } catch (err) {
@@ -94,18 +106,18 @@ router.get('/alerts', async (req, res) => {
 });
 
 // GET /api/stats?area=<area_name_he>&days=N  or  ?area=<area_name_he>&today=1
-// area param is the Hebrew sub-area name (area_name_he).
+// Matches the selected area + parent + sibling subdivisions.
 router.get('/stats', async (req, res) => {
   const area = req.query.area;
   if (!area) return res.status(400).json({ error: 'area param required' });
-  const tc = timeClause(req.query, 2);
-  const qParams = [area, ...tc.params];
+  const tc = timeClause(req.query, 3);
+  const qParams = [...areaParams(area), ...tc.params];
 
   const dedupCte = `
     WITH deduped AS (
       SELECT alerted_at, category, category_desc
       FROM alerts
-      WHERE area_name_he = $1
+      WHERE ${areaClause(1)}
         AND ${tc.clause}
         AND ${EXCLUDE_FILTER}
     )
@@ -208,7 +220,8 @@ router.get('/prediction', async (req, res) => {
   if (!area) return res.status(400).json({ error: 'area param required' });
 
   try {
-    const baseFilter = `area_name_he = $1 AND ${EXCLUDE_FILTER}`;
+    const predFilter = `${areaClause(1)} AND ${EXCLUDE_FILTER}`;
+    const predParams = areaParams(area);
 
     const [observationResult, hourlyResult, last24hResult, lastAlertResult, dowResult] =
       await Promise.all([
@@ -219,8 +232,8 @@ router.get('/prediction', async (req, res) => {
              COUNT(DISTINCT DATE_TRUNC('hour', alerted_at AT TIME ZONE 'Asia/Jerusalem')) AS hours_with_alerts,
              EXTRACT(EPOCH FROM (MAX(alerted_at) - MIN(alerted_at))) / 3600.0 AS observation_hours
            FROM alerts
-           WHERE ${baseFilter}`,
-          [area]
+           WHERE ${predFilter}`,
+          predParams
         ),
         // 2. Hourly pattern (alerts per hour-of-day)
         pool.query(
@@ -228,25 +241,25 @@ router.get('/prediction', async (req, res) => {
              EXTRACT(HOUR FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS hour,
              COUNT(*) AS count
            FROM alerts
-           WHERE ${baseFilter}
+           WHERE ${predFilter}
            GROUP BY hour
            ORDER BY hour`,
-          [area]
+          predParams
         ),
         // 3. Alerts in last 24 hours
         pool.query(
           `SELECT COUNT(*) AS count
            FROM alerts
-           WHERE ${baseFilter}
+           WHERE ${predFilter}
              AND alerted_at >= NOW() - INTERVAL '24 hours'`,
-          [area]
+          predParams
         ),
         // 4. Most recent alert
         pool.query(
           `SELECT MAX(alerted_at) AS last_alert
            FROM alerts
-           WHERE ${baseFilter}`,
-          [area]
+           WHERE ${predFilter}`,
+          predParams
         ),
         // 5. Day-of-week pattern
         pool.query(
@@ -254,10 +267,10 @@ router.get('/prediction', async (req, res) => {
              EXTRACT(DOW FROM alerted_at AT TIME ZONE 'Asia/Jerusalem')::int AS dow,
              COUNT(*) AS count
            FROM alerts
-           WHERE ${baseFilter}
+           WHERE ${predFilter}
            GROUP BY dow
            ORDER BY dow`,
-          [area]
+          predParams
         ),
       ]);
 
