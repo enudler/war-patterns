@@ -16,12 +16,12 @@ export async function fetchAreas(period) {
 }
 
 export async function fetchStats(area, period) {
-  const { data } = await api.get('/api/stats', { params: { area, ...timeParams(period) } });
+  const { data } = await api.get(`/api/areas/${encodeURIComponent(area)}/stats`, { params: timeParams(period) });
   return data;
 }
 
 export async function fetchAlerts(area, period) {
-  const { data } = await api.get('/api/alerts', { params: { area, ...timeParams(period) } });
+  const { data } = await api.get(`/api/areas/${encodeURIComponent(area)}/alerts`, { params: timeParams(period) });
   return data;
 }
 
@@ -41,6 +41,6 @@ export async function fetchStatus() {
 }
 
 export async function fetchPrediction(area) {
-  const { data } = await api.get('/api/prediction', { params: { area } });
+  const { data } = await api.get(`/api/areas/${encodeURIComponent(area)}/prediction`);
   return data;
 }

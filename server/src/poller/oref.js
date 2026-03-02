@@ -127,3 +127,4 @@ function startPoller(intervalMs = 15000) {
 }
 
 module.exports = { startPoller };
+module.exports._test = { geocode, makeOrefId, fetchAlerts };
