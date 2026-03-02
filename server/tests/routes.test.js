@@ -64,6 +64,23 @@ describe('GET /api/alerts', () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
+  test('deduplicates sibling sub-areas: returns one row per (alerted_at, category)', async () => {
+    // Simulate the DB returning one row after DISTINCT ON has collapsed siblings.
+    // Both "אשקלון - דרום" and "אשקלון - צפון" fire at the same time; the DB
+    // should give us just one row (DISTINCT ON handled in SQL).
+    const ts = '2024-01-01T12:00:00.000Z';
+    pool.query.mockResolvedValue({
+      rows: [
+        { id: 1, oref_id: 'abc', category: 1, category_desc: 'Rocket / Missile',
+          area_name: 'Ashkelon', area_name_he: 'אשקלון - דרום', lat: 31.6, lon: 34.5, alerted_at: ts },
+      ],
+    });
+    const res = await request(app).get('/api/alerts?area=אשקלון');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].alerted_at).toBe(ts);
+  });
+
   test('returns 500 on DB error', async () => {
     pool.query.mockRejectedValue(new Error('DB down'));
     const res = await request(app).get('/api/alerts?area=Test');

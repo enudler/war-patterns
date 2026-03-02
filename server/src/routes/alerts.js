@@ -88,13 +88,17 @@ router.get('/alerts', async (req, res) => {
   if (!area) return res.status(400).json({ error: 'area param required' });
   const tc = timeClause(req.query, 3);
   try {
+    // DISTINCT ON (alerted_at, category) collapses sibling sub-areas that fired
+    // at exactly the same timestamp into one row, eliminating duplicate entries
+    // in the sidebar list (e.g. "אשקלון - דרום" and "אשקלון - צפון" at 12:00).
     const result = await pool.query(
-      `SELECT id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
+      `SELECT DISTINCT ON (alerted_at, category)
+         id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
        FROM alerts
        WHERE ${areaClause(1)}
          AND ${tc.clause}
          AND ${EXCLUDE_FILTER}
-       ORDER BY alerted_at DESC
+       ORDER BY alerted_at DESC, category
        LIMIT 100`,
       [...areaParams(area), ...tc.params]
     );
@@ -113,13 +117,17 @@ router.get('/stats', async (req, res) => {
   const tc = timeClause(req.query, 3);
   const qParams = [...areaParams(area), ...tc.params];
 
+  // DISTINCT ON (alerted_at, category) collapses sibling sub-areas (e.g.
+  // "אשקלון - דרום" + "אשקלון - צפון") that fired at the same timestamp so
+  // chart counts and totals reflect unique events, not per-sub-area rows.
   const dedupCte = `
     WITH deduped AS (
-      SELECT alerted_at, category, category_desc
+      SELECT DISTINCT ON (alerted_at, category) alerted_at, category, category_desc
       FROM alerts
       WHERE ${areaClause(1)}
         AND ${tc.clause}
         AND ${EXCLUDE_FILTER}
+      ORDER BY alerted_at, category
     )
   `;
 
