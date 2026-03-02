@@ -412,3 +412,4 @@ router.get('/status', async (_req, res) => {
 });
 
 module.exports = router;
+module.exports._test = { areaParams, timeClause, isDST };
