@@ -109,13 +109,14 @@ export default function App() {
   const favoriteAreaLabel = favoriteArea ? (areaLabelMap.get(favoriteArea) ?? favoriteArea) : null;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f0f1a' }}>
-      <div style={{ flex: 1, position: 'relative' }}>
+    <div className="app-layout" style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f0f1a' }}>
+      <div className="app-map-pane" style={{ flex: 1, position: 'relative' }}>
         {error && (
           <div style={{
             position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
             zIndex: 2000, background: '#7f1d1d', color: '#fca5a5',
-            padding: '8px 20px', borderRadius: 6, fontSize: 13, fontFamily: 'system-ui, sans-serif',
+            padding: '8px 16px', borderRadius: 6, fontSize: 12, fontFamily: 'system-ui, sans-serif',
+            maxWidth: '90%', textAlign: 'center',
           }}>
             {error}
           </div>

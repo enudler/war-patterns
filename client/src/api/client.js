@@ -39,3 +39,8 @@ export async function fetchStatus() {
   const { data } = await api.get('/api/status');
   return data;
 }
+
+export async function fetchPrediction(area) {
+  const { data } = await api.get('/api/prediction', { params: { area } });
+  return data;
+}

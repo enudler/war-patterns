@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchStats, fetchAlerts } from '../api/client';
 import { DailyBarChart, HourlyBarChart, TypePieChart } from './Charts';
+import PredictionGauge from './PredictionGauge';
 
 const DAY_OPTIONS = [
   { value: 'today', label: 'Today' },
@@ -16,10 +17,6 @@ const DAY_OPTIONS = [
 const TYPE_BADGE_COLORS = {
   'Rocket / Missile': '#ef4444',
   'UAV / Drone': '#f97316',
-  'Earthquake': '#8b5cf6',
-  'Hostile Aircraft': '#ec4899',
-  'Unconventional Missile': '#dc2626',
-  'Infrastructure Hazard': '#10b981',
 };
 
 function badgeColor(desc) {
@@ -80,14 +77,14 @@ export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea,
   };
 
   return (
-    <div style={sidebarStyle}>
+    <div className="app-sidebar" style={sidebarStyle}>
       {/* Header */}
       <div style={{ padding: '18px 20px 10px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
         <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
           War Patterns · Israel Alert Tracker
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', flex: 1 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#fff', flex: 1, wordBreak: 'break-word' }}>
             {selectedAreaLabel || 'Select a location on the map'}
           </div>
           {selectedArea && (
@@ -145,7 +142,7 @@ export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea,
                 onClick={() => onDaysChange(value)}
                 title={isPartial ? `Only ~${availableDays}d of data collected so far` : undefined}
                 style={{
-                  padding: '5px 12px',
+                  padding: '6px 14px',
                   borderRadius: 20,
                   border: '1px solid',
                   borderColor: isSelected ? '#ef4444' : isPartial ? 'rgba(234,179,8,0.4)' : 'rgba(255,255,255,0.12)',
@@ -219,6 +216,9 @@ export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea,
       {selectedArea && error && (
         <div style={{ padding: 20, color: '#ef4444', fontSize: 13 }}>{error}</div>
       )}
+
+      {/* Prediction Gauge — always visible when area selected (independent of stats loading) */}
+      {selectedArea && <PredictionGauge area={selectedArea} />}
 
       {selectedArea && stats && !loading && (
         <>

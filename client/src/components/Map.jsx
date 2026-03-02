@@ -5,9 +5,6 @@ import 'leaflet/dist/leaflet.css';
 const CATEGORY_COLORS = {
   1: '#ef4444',
   2: '#f97316',
-  3: '#8b5cf6',
-  7: '#ec4899',
-  8: '#dc2626',
   default: '#3b82f6',
 };
 
@@ -205,6 +202,7 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
 
       {/* Legend */}
       <div
+        className="map-legend"
         style={{
           position: 'absolute',
           bottom: 30,
@@ -212,9 +210,9 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
           zIndex: 1000,
           background: 'rgba(15,15,25,0.88)',
           color: '#fff',
-          padding: '10px 14px',
+          padding: '8px 12px',
           borderRadius: 8,
-          fontSize: 12,
+          fontSize: 11,
           lineHeight: '1.8',
           backdropFilter: 'blur(4px)',
           border: '1px solid rgba(255,255,255,0.1)',
@@ -223,8 +221,6 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
         {[
           [1, 'Rocket / Missile'],
           [2, 'UAV / Drone'],
-          [3, 'Earthquake'],
-          [7, 'Hostile Aircraft'],
         ].map(([cat, label]) => (
           <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: categoryColor(cat) }} />
