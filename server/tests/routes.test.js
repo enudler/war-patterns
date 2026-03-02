@@ -47,6 +47,16 @@ describe('GET /api/areas/all', () => {
       expect(res.body[0]).toHaveProperty('lon');
     }
   });
+
+  test('groups sub-areas under parent city names (no duplicates)', async () => {
+    const res = await request(app).get('/api/areas/all');
+    const names = res.body.map((a) => a.area_name_he);
+    // No area_name_he should contain " - " (sub-area suffix)
+    const subAreas = names.filter((n) => n.includes(' - '));
+    expect(subAreas).toEqual([]);
+    // No duplicate names
+    expect(new Set(names).size).toBe(names.length);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -156,6 +166,31 @@ describe('GET /api/areas', () => {
     pool.query.mockResolvedValue({ rows: [] });
     const res = await request(app).get('/api/areas?today=1');
     expect(res.status).toBe(200);
+  });
+
+  test('returns grouped parent cities with has_subdivisions field', async () => {
+    pool.query.mockResolvedValue({
+      rows: [
+        {
+          area_name_he: 'תל אביב', area_name: 'Tel Aviv',
+          lat: 32.08, lon: 34.78, alert_count: '10', last_alert: '2024-01-01T12:00:00Z',
+          dominant_category: '1', dominant_category_desc: 'Rocket / Missile',
+          has_subdivisions: true, subdivision_count: '4',
+        },
+      ],
+    });
+    const res = await request(app).get('/api/areas');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].area_name_he).toBe('תל אביב');
+    expect(res.body[0].has_subdivisions).toBe(true);
+  });
+
+  test('returns 500 on DB error', async () => {
+    pool.query.mockRejectedValue(new Error('DB down'));
+    const res = await request(app).get('/api/areas');
+    expect(res.status).toBe(500);
+    expect(res.body).toHaveProperty('error');
   });
 });
 

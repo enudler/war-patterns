@@ -1,7 +1,29 @@
 'use strict';
 
 const { _test } = require('../src/routes/alerts');
-const { areaParams, timeClause, isDST } = _test;
+const { baseAreaName, areaParams, timeClause, isDST } = _test;
+
+describe('baseAreaName', () => {
+  test('returns the name unchanged when there is no subdivision suffix', () => {
+    expect(baseAreaName('אשקלון')).toBe('אשקלון');
+  });
+
+  test('strips the subdivision suffix after " - "', () => {
+    expect(baseAreaName('אשקלון - דרום')).toBe('אשקלון');
+  });
+
+  test('strips only the first " - " and everything after it', () => {
+    expect(baseAreaName('תל אביב - דרום העיר ויפו')).toBe('תל אביב');
+  });
+
+  test('handles multi-word base names', () => {
+    expect(baseAreaName('תל אביב')).toBe('תל אביב');
+  });
+
+  test('trims whitespace', () => {
+    expect(baseAreaName(' חיפה - מערב ')).toBe('חיפה');
+  });
+});
 
 describe('areaParams', () => {
   test('returns base name and LIKE pattern for a plain area', () => {

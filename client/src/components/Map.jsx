@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Tooltip, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const CATEGORY_COLORS = {
@@ -80,28 +80,6 @@ function MapClickHandler({ areas, onSelectArea }) {
 }
 
 export default function Map({ areas, selectedArea, onSelectArea, days }) {
-  const [picker, setPicker] = useState(null); // { lat, lon, options: Area[] }
-
-  // Group areas by coordinate to detect stacks
-  const coordGroups = {};
-  for (const a of areas) {
-    if (!a.lat || !a.lon) continue;
-    const key = `${a.lat},${a.lon}`;
-    if (!coordGroups[key]) coordGroups[key] = [];
-    coordGroups[key].push(a);
-  }
-
-  function handleMarkerClick(e, area) {
-    e.originalEvent.stopPropagation();
-    const key = `${area.lat},${area.lon}`;
-    const siblings = (coordGroups[key] || []).filter((a) => parseInt(a.alert_count, 10) > 0);
-    if (siblings.length > 1) {
-      setPicker({ lat: parseFloat(area.lat), lon: parseFloat(area.lon), options: siblings });
-    } else {
-      onSelectArea(area.area_name_he);
-    }
-  }
-
   return (
     <MapContainer
       center={[31.5, 34.9]}
@@ -138,7 +116,7 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
               fillOpacity: isSelected ? 0.95 : hasAlerts ? 0.7 : 0.25,
               weight: isSelected ? 3 : hasAlerts ? 1.5 : 1,
             }}
-            eventHandlers={{ click: (e) => handleMarkerClick(e, area) }}
+            eventHandlers={{ click: (e) => { e.originalEvent.stopPropagation(); onSelectArea(area.area_name_he); } }}
           >
             <Tooltip direction="top" offset={[0, -6]} opacity={0.95}>
               <div style={{ fontFamily: 'sans-serif', fontSize: 12 }}>
@@ -157,48 +135,6 @@ export default function Map({ areas, selectedArea, onSelectArea, days }) {
           </CircleMarker>
         );
       })}
-
-      {picker && (
-        <Popup
-          position={[picker.lat, picker.lon]}
-          onClose={() => setPicker(null)}
-          closeButton={false}
-        >
-          <div style={{ fontFamily: 'sans-serif', fontSize: 13, minWidth: 160 }}>
-            <div style={{ fontWeight: 700, marginBottom: 8, color: '#333' }}>
-              {picker.options[0].area_name} — choose sub-area:
-            </div>
-            {picker.options.map((opt) => {
-              const count = parseInt(opt.alert_count, 10) || 0;
-              const cat = parseInt(opt.dominant_category, 10);
-              const color = count > 0 ? categoryColor(cat) : '#9ca3af';
-              return (
-                <div
-                  key={opt.area_name_he}
-                  onClick={() => { onSelectArea(opt.area_name_he); setPicker(null); }}
-                  style={{
-                    padding: '6px 8px',
-                    borderRadius: 5,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 12,
-                    marginBottom: 2,
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                >
-                  <span style={{ color: '#111' }}>{opt.area_name_he}</span>
-                  <span style={{ color, fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
-                    {count > 0 ? `${count} alerts` : 'no alerts'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </Popup>
-      )}
 
       {/* Legend */}
       <div

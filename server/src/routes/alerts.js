@@ -7,6 +7,13 @@ const router = express.Router();
 // Only include Rocket/Missile (1) and UAV/Drone (2) categories
 const EXCLUDE_FILTER = `category IN (1, 2)`;
 
+// Extract the parent city name from an oref sub-area identifier.
+// "אשקלון - דרום" → "אשקלון"
+// "אשקלון"         → "אשקלון"
+function baseAreaName(nameHe) {
+  return nameHe.replace(/ - .*$/, '').trim();
+}
+
 // Match an area and all sibling subdivisions sharing the same base name.
 // "אשקלון - דרום" → matches "אשקלון", "אשקלון - דרום", "אשקלון - צפון", etc.
 // "אשקלון"         → matches "אשקלון", "אשקלון - דרום", "אשקלון - צפון", etc.
@@ -15,19 +22,21 @@ function areaClause(paramBase) {
   return `(area_name_he = $${paramBase} OR area_name_he LIKE $${paramBase + 1})`;
 }
 function areaParams(area) {
-  const baseName = area.replace(/ - .*$/, '').trim();
+  const baseName = baseAreaName(area);
   return [baseName, `${baseName} - %`];
 }
 
 // GET /api/areas/all — all known areas with coords (no DB needed)
+// Groups sub-areas under parent city names to match /api/areas grouping.
 router.get('/areas/all', (_req, res) => {
-  const result = Object.entries(areasData).map(([name_he, v]) => ({
-    area_name: v.name_en,
-    area_name_he: name_he,
-    lat: v.lat,
-    lon: v.lon,
-  }));
-  res.json(result);
+  const grouped = {};
+  for (const [name_he, v] of Object.entries(areasData)) {
+    const base = baseAreaName(name_he);
+    if (!grouped[base]) {
+      grouped[base] = { area_name: v.name_en, area_name_he: base, lat: v.lat, lon: v.lon };
+    }
+  }
+  res.json(Object.values(grouped));
 });
 
 // Returns { clause, params, label } for WHERE time filter.
@@ -52,25 +61,44 @@ function timeClause(query, paramBase = 1) {
 }
 
 // GET /api/areas?days=N  or  ?today=1
-// Groups by area_name_he so every oref sub-area gets its own marker on the map.
+// Groups sub-areas under their parent city (strips " - ..." suffix) so
+// "תל אביב - מזרח" and "תל אביב - דרום" appear as one "תל אביב" marker.
+// Uses DISTINCT ON to deduplicate alerts that fire across multiple sub-areas
+// at the same timestamp (a single volley triggers many sub-areas simultaneously).
 router.get('/areas', async (req, res) => {
   const tc = timeClause(req.query, 1);
   try {
     const result = await pool.query(
-      `SELECT
-         area_name_he,
-         area_name,
-         lat,
-         lon,
-         COUNT(*)                                         AS alert_count,
-         MAX(alerted_at)                                  AS last_alert,
-         MODE() WITHIN GROUP (ORDER BY category)          AS dominant_category,
-         MODE() WITHIN GROUP (ORDER BY category_desc)     AS dominant_category_desc
-       FROM alerts
-       WHERE ${tc.clause}
-         AND lat IS NOT NULL
-         AND ${EXCLUDE_FILTER}
-       GROUP BY area_name_he, area_name, lat, lon
+      `WITH base AS (
+         SELECT
+           REGEXP_REPLACE(area_name_he, ' - .*$', '') AS base_name_he,
+           REGEXP_REPLACE(area_name, ' - .*$', '')    AS base_name_en,
+           alerted_at, category, category_desc, lat, lon,
+           area_name_he AS orig_name_he
+         FROM alerts
+         WHERE ${tc.clause}
+           AND lat IS NOT NULL
+           AND ${EXCLUDE_FILTER}
+       ),
+       deduped AS (
+         SELECT DISTINCT ON (base_name_he, alerted_at, category)
+           base_name_he, base_name_en, alerted_at, category, category_desc, lat, lon, orig_name_he
+         FROM base
+         ORDER BY base_name_he, alerted_at, category
+       )
+       SELECT
+         base_name_he                                      AS area_name_he,
+         MIN(base_name_en)                                 AS area_name,
+         MIN(lat)                                          AS lat,
+         MIN(lon)                                          AS lon,
+         COUNT(*)                                          AS alert_count,
+         MAX(alerted_at)                                   AS last_alert,
+         MODE() WITHIN GROUP (ORDER BY category)           AS dominant_category,
+         MODE() WITHIN GROUP (ORDER BY category_desc)      AS dominant_category_desc,
+         COUNT(DISTINCT orig_name_he) > 1                  AS has_subdivisions,
+         COUNT(DISTINCT orig_name_he)                      AS subdivision_count
+       FROM deduped
+       GROUP BY base_name_he
        ORDER BY alert_count DESC`,
       tc.params
     );
@@ -481,4 +509,4 @@ router.get('/status', async (_req, res) => {
 });
 
 module.exports = router;
-module.exports._test = { areaParams, timeClause, isDST, computePrediction };
+module.exports._test = { baseAreaName, areaParams, timeClause, isDST, computePrediction };
