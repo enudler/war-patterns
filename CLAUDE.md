@@ -68,21 +68,30 @@ PORT=3001
 POLL_INTERVAL_MS=15000
 ```
 
-## API Routes
+## API Routes (RESTful)
+
+Area-scoped resources use the Hebrew area identifier (`area_name_he`) as a
+URL path segment (URL-encoded). The OpenAPI 3.1 spec is served at
+`GET /api/openapi.yaml`.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness check |
+| GET | `/api/openapi.yaml` | Machine-readable OpenAPI 3.1 spec |
 | GET | `/api/areas` | Alert counts per area (map markers) |
 | GET | `/api/areas/all` | All known areas with coords (no DB) |
-| GET | `/api/alerts` | Raw alert list for one area |
-| GET | `/api/stats` | Aggregated stats (pie/bar charts) |
+| GET | `/api/areas/:area/alerts` | Alert list for one area (deduped) |
+| GET | `/api/areas/:area/stats` | Aggregated stats (pie/bar charts) |
+| GET | `/api/areas/:area/prediction` | Next-hour attack probability (0–1) |
 | GET | `/api/summary` | Global totals by threat type |
-| GET | `/api/prediction` | Next-hour attack probability (0–1) |
 | GET | `/api/status` | Oldest/newest alert timestamps |
 
-Query params: `?today=1` (since midnight Israel time) or `?days=N` (1–14).
-`/api/alerts`, `/api/stats`, `/api/prediction` require `?area=<area_name_he>`.
+`:area` = URL-encoded `area_name_he`, e.g. `%D7%90%D7%A9%D7%A7%D7%9C%D7%95%D7%9F`
+for אשקלון. The server automatically expands the area to include sibling
+sub-areas (e.g. `אשקלון - דרום`, `אשקלון - צפון`).
+
+Time-filter query params (all collection endpoints): `?today=1` for since
+midnight Israel time, or `?days=N` (1–14, default 7).
 
 ## Attack-Probability Model (`computePrediction`)
 

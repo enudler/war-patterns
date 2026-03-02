@@ -18,6 +18,11 @@ app.use('/api', alertRoutes);
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
+// Serve the OpenAPI spec
+app.get('/api/openapi.yaml', (_req, res) => {
+  res.type('text/yaml').sendFile(path.join(__dirname, 'openapi.yaml'));
+});
+
 // Serve the built React client when the /public directory exists (Docker).
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 if (fs.existsSync(PUBLIC_DIR)) {

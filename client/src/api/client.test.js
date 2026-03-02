@@ -1,6 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 
-// Hoist the mock fn so it is available inside the vi.mock factory
 const mockGet = vi.hoisted(() => vi.fn());
 
 vi.mock('axios', () => ({
@@ -20,9 +19,11 @@ import {
 } from './client.js';
 
 beforeEach(() => {
+  mockGet.mockClear();
   mockGet.mockResolvedValue({ data: [] });
 });
 
+// ---------------------------------------------------------------------------
 describe('fetchAreas', () => {
   test('calls /api/areas with { days } for a numeric period', async () => {
     await fetchAreas(7);
@@ -42,38 +43,57 @@ describe('fetchAreas', () => {
   });
 });
 
-describe('fetchStats', () => {
-  test('calls /api/stats with area and days params', async () => {
+// ---------------------------------------------------------------------------
+describe('fetchStats  (RESTful path param)', () => {
+  test('encodes area as a path segment and passes days as a query param', async () => {
     await fetchStats('תל אביב', 7);
-    expect(mockGet).toHaveBeenCalledWith('/api/stats', {
-      params: { area: 'תל אביב', days: 7 },
-    });
+    expect(mockGet).toHaveBeenCalledWith(
+      `/api/areas/${encodeURIComponent('תל אביב')}/stats`,
+      { params: { days: 7 } }
+    );
   });
 
-  test('calls /api/stats with area and today=1 for "today" period', async () => {
+  test('uses today=1 query param for "today" period', async () => {
     await fetchStats('אשקלון', 'today');
-    expect(mockGet).toHaveBeenCalledWith('/api/stats', {
-      params: { area: 'אשקלון', today: 1 },
-    });
+    expect(mockGet).toHaveBeenCalledWith(
+      `/api/areas/${encodeURIComponent('אשקלון')}/stats`,
+      { params: { today: 1 } }
+    );
+  });
+
+  test('does NOT pass area as a query param', async () => {
+    await fetchStats('Test', 5);
+    const [, options] = mockGet.mock.calls[0];
+    expect(options.params).not.toHaveProperty('area');
   });
 });
 
-describe('fetchAlerts', () => {
-  test('calls /api/alerts with area and days params', async () => {
+// ---------------------------------------------------------------------------
+describe('fetchAlerts  (RESTful path param)', () => {
+  test('encodes area as a path segment and passes days as a query param', async () => {
     await fetchAlerts('תל אביב', 5);
-    expect(mockGet).toHaveBeenCalledWith('/api/alerts', {
-      params: { area: 'תל אביב', days: 5 },
-    });
+    expect(mockGet).toHaveBeenCalledWith(
+      `/api/areas/${encodeURIComponent('תל אביב')}/alerts`,
+      { params: { days: 5 } }
+    );
   });
 
-  test('calls /api/alerts with today=1 for "today" period', async () => {
+  test('uses today=1 query param for "today" period', async () => {
     await fetchAlerts('אשקלון', 'today');
-    expect(mockGet).toHaveBeenCalledWith('/api/alerts', {
-      params: { area: 'אשקלון', today: 1 },
-    });
+    expect(mockGet).toHaveBeenCalledWith(
+      `/api/areas/${encodeURIComponent('אשקלון')}/alerts`,
+      { params: { today: 1 } }
+    );
+  });
+
+  test('does NOT pass area as a query param', async () => {
+    await fetchAlerts('Test', 5);
+    const [, options] = mockGet.mock.calls[0];
+    expect(options.params).not.toHaveProperty('area');
   });
 });
 
+// ---------------------------------------------------------------------------
 describe('fetchSummary', () => {
   test('calls /api/summary with days param', async () => {
     await fetchSummary(3);
@@ -86,6 +106,7 @@ describe('fetchSummary', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
 describe('fetchAllAreas', () => {
   test('calls /api/areas/all with no params', async () => {
     await fetchAllAreas();
@@ -100,6 +121,7 @@ describe('fetchAllAreas', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
 describe('fetchStatus', () => {
   test('calls /api/status with no params', async () => {
     await fetchStatus();
@@ -107,12 +129,20 @@ describe('fetchStatus', () => {
   });
 });
 
-describe('fetchPrediction', () => {
-  test('calls /api/prediction with the area param', async () => {
+// ---------------------------------------------------------------------------
+describe('fetchPrediction  (RESTful path param)', () => {
+  test('encodes area as a path segment with no query params', async () => {
     await fetchPrediction('תל אביב');
-    expect(mockGet).toHaveBeenCalledWith('/api/prediction', {
-      params: { area: 'תל אביב' },
-    });
+    expect(mockGet).toHaveBeenCalledWith(
+      `/api/areas/${encodeURIComponent('תל אביב')}/prediction`
+    );
+  });
+
+  test('does NOT pass area as a query param', async () => {
+    await fetchPrediction('Test');
+    const call = mockGet.mock.calls[0];
+    // Only the URL string is passed — no options object
+    expect(call).toHaveLength(1);
   });
 
   test('returns prediction data from the response', async () => {

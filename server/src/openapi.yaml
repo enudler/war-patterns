@@ -1,0 +1,419 @@
+openapi: 3.1.0
+
+info:
+  title: War Patterns API
+  version: 1.0.0
+  description: |
+    Real-time Israeli Home Front Command (Pikud Ha'oref) alert tracker.
+    Polls oref.org.il every 15 s, stores Rocket/Missile and UAV/Drone alerts
+    in PostgreSQL, and exposes historical patterns plus a multi-factor
+    next-hour attack-probability model.
+
+    All time-filtered endpoints accept either `?days=N` (1–14, default 7)
+    or `?today=1` (since midnight Israel time). Area-scoped endpoints use a
+    URL path parameter (`area_name_he`, URL-encoded) rather than a query param.
+
+servers:
+  - url: /api
+    description: API (same-origin; prepend http://localhost:3001 in development)
+
+paths:
+
+  # ── Collections ────────────────────────────────────────────────────────────
+
+  /areas:
+    get:
+      summary: List active areas with alert counts
+      description: >
+        Returns every area that had at least one alert in the requested period,
+        grouped by `area_name_he`. Use this to populate the map markers.
+      operationId: listAreas
+      parameters:
+        - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/Today'
+      responses:
+        '200':
+          description: Array of areas ordered by alert count descending
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AreaSummary'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /areas/all:
+    get:
+      summary: All known areas with coordinates (no DB required)
+      description: >
+        Returns every entry from the static geocoding lookup table
+        (`areas.json`). Use this to pre-populate the area picker and the map
+        before live alert data arrives.
+      operationId: listAllAreas
+      responses:
+        '200':
+          description: Full area list with coordinates and English names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AreaInfo'
+
+  /summary:
+    get:
+      summary: Global alert totals across all areas
+      description: >
+        Aggregates unique events (deduplicated by area + timestamp + category)
+        across every area for the requested period.
+      operationId: getSummary
+      parameters:
+        - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/Today'
+      responses:
+        '200':
+          description: Period totals grouped by threat type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Summary'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /status:
+    get:
+      summary: Data collection range
+      description: >
+        Returns the oldest and newest `alerted_at` timestamps currently in the
+        database. Useful for showing users how much history is available and
+        warning when the selected time range exceeds it.
+      operationId: getStatus
+      responses:
+        '200':
+          description: Oldest and newest alert timestamps
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  # ── Area-scoped resources ──────────────────────────────────────────────────
+
+  /areas/{area}/alerts:
+    get:
+      summary: Recent alert list for an area
+      description: >
+        Returns up to 100 most-recent alerts for the area and all sibling
+        sub-areas (e.g. selecting "אשקלון" also includes "אשקלון - דרום",
+        "אשקלון - צפון", etc.). Results are deduplicated by
+        `(alerted_at, category)` so simultaneous sub-area firings appear once.
+      operationId: listAreaAlerts
+      parameters:
+        - $ref: '#/components/parameters/AreaPath'
+        - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/Today'
+      responses:
+        '200':
+          description: Deduplicated alert list, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Alert'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /areas/{area}/stats:
+    get:
+      summary: Aggregated statistics for an area
+      description: >
+        Returns breakdowns by threat type, calendar day, and hour-of-day for
+        the requested period. Counts are deduplicated by `(alerted_at, category)`
+        so sub-area siblings do not inflate the totals.
+      operationId: getAreaStats
+      parameters:
+        - $ref: '#/components/parameters/AreaPath'
+        - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/Today'
+      responses:
+        '200':
+          description: Breakdown by type, day, and hour
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AreaStats'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /areas/{area}/prediction:
+    get:
+      summary: Next-hour attack probability for an area
+      description: >
+        Runs a five-factor log-odds model (base rate, hour-of-day,
+        24-h trend, momentum, day-of-week) and returns a probability in [0, 1]
+        with a risk-level label and the individual factor values.
+        All factor weights are scaled by a data-confidence scalar that shrinks
+        toward the base rate when history is sparse (< 50 alerts).
+      operationId: getAreaPrediction
+      parameters:
+        - $ref: '#/components/parameters/AreaPath'
+      responses:
+        '200':
+          description: Probability model output
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Prediction'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+# ── Components ────────────────────────────────────────────────────────────────
+
+components:
+
+  parameters:
+
+    AreaPath:
+      name: area
+      in: path
+      required: true
+      description: >
+        Hebrew area identifier (`area_name_he`), URL-encoded.
+        Example: `%D7%90%D7%A9%D7%A7%D7%9C%D7%95%D7%9F` (אשקלון).
+        The server automatically includes parent and sibling sub-areas.
+      schema:
+        type: string
+
+    Days:
+      name: days
+      in: query
+      required: false
+      description: >
+        Number of past days to include (1–14). Mutually exclusive with `today`.
+        Defaults to 7 when neither `days` nor `today` is supplied.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 14
+        default: 7
+
+    Today:
+      name: today
+      in: query
+      required: false
+      description: >
+        Set to `1` to include only alerts since midnight Israel time
+        (`Asia/Jerusalem`, DST-aware). Takes precedence over `days`.
+      schema:
+        type: integer
+        enum: [1]
+
+  responses:
+
+    ServerError:
+      description: Database or internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    AreaInfo:
+      type: object
+      required: [area_name, area_name_he]
+      properties:
+        area_name:
+          type: string
+          description: English display name
+          example: Ashkelon
+        area_name_he:
+          type: string
+          description: Hebrew area identifier used in path params
+          example: אשקלון
+        lat:
+          type: number
+          nullable: true
+          example: 31.665
+        lon:
+          type: number
+          nullable: true
+          example: 34.571
+
+    AreaSummary:
+      allOf:
+        - $ref: '#/components/schemas/AreaInfo'
+        - type: object
+          properties:
+            alert_count:
+              type: integer
+              example: 42
+            last_alert:
+              type: string
+              format: date-time
+            dominant_category:
+              type: integer
+              description: 1 = Rocket/Missile, 2 = UAV/Drone
+              example: 1
+            dominant_category_desc:
+              type: string
+              example: Rocket / Missile
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: integer
+        oref_id:
+          type: string
+          description: SHA1-based dedup key (28 hex chars)
+        category:
+          type: integer
+          description: 1 = Rocket/Missile, 2 = UAV/Drone
+        category_desc:
+          type: string
+        area_name:
+          type: string
+        area_name_he:
+          type: string
+        lat:
+          type: number
+          nullable: true
+        lon:
+          type: number
+          nullable: true
+        alerted_at:
+          type: string
+          format: date-time
+
+    AreaStats:
+      type: object
+      properties:
+        area:
+          type: string
+        period:
+          type: string
+          example: 7d
+        total:
+          type: integer
+        byType:
+          type: array
+          items:
+            type: object
+            properties:
+              category:
+                type: integer
+              category_desc:
+                type: string
+              count:
+                type: integer
+        byDay:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              count:
+                type: integer
+        byHour:
+          type: array
+          items:
+            type: object
+            properties:
+              hour:
+                type: integer
+                minimum: 0
+                maximum: 23
+              count:
+                type: integer
+
+    Prediction:
+      type: object
+      properties:
+        area:
+          type: string
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.342
+        riskLevel:
+          type: string
+          enum: [none, very_low, low, moderate, high, very_high, critical]
+          example: moderate
+        factors:
+          type: object
+          properties:
+            baseRate:
+              type: number
+              description: Laplace-smoothed fraction of hour-slots with ≥1 alert
+            hourlyFactor:
+              type: number
+              description: Current hour's activity relative to 24-h average
+            trendFactor:
+              type: number
+              description: Last-24-h rate relative to overall rate
+            momentumScore:
+              type: number
+              description: Exponential decay from most recent alert (0–1)
+            dowFactor:
+              type: number
+              description: Current day-of-week activity relative to weekly average
+        meta:
+          type: object
+          properties:
+            totalAlerts:
+              type: integer
+            observationHours:
+              type: number
+            hoursSinceLastAlert:
+              type: number
+              nullable: true
+            alertsLast24h:
+              type: integer
+            currentHour:
+              type: integer
+              minimum: 0
+              maximum: 23
+
+    Summary:
+      type: object
+      properties:
+        period:
+          type: string
+          example: 7d
+        total:
+          type: integer
+        byType:
+          type: array
+          items:
+            type: object
+            properties:
+              category_desc:
+                type: string
+              count:
+                type: integer
+
+    Status:
+      type: object
+      properties:
+        oldest:
+          type: string
+          format: date-time
+          nullable: true
+        newest:
+          type: string
+          format: date-time
+          nullable: true

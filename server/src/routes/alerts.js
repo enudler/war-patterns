@@ -81,11 +81,11 @@ router.get('/areas', async (req, res) => {
   }
 });
 
-// GET /api/alerts?area=<area_name_he>&days=N  or  ?area=<area_name_he>&today=1
+// GET /api/areas/:area/alerts?days=N  or  ?today=1
+// :area is the Hebrew area_name_he, URL-encoded in the path.
 // Matches the selected area + parent + sibling subdivisions.
-router.get('/alerts', async (req, res) => {
-  const area = req.query.area;
-  if (!area) return res.status(400).json({ error: 'area param required' });
+router.get('/areas/:area/alerts', async (req, res) => {
+  const area = req.params.area;
   const tc = timeClause(req.query, 3);
   try {
     // DISTINCT ON (alerted_at, category) collapses sibling sub-areas that fired
@@ -109,11 +109,11 @@ router.get('/alerts', async (req, res) => {
   }
 });
 
-// GET /api/stats?area=<area_name_he>&days=N  or  ?area=<area_name_he>&today=1
+// GET /api/areas/:area/stats?days=N  or  ?today=1
+// :area is the Hebrew area_name_he, URL-encoded in the path.
 // Matches the selected area + parent + sibling subdivisions.
-router.get('/stats', async (req, res) => {
-  const area = req.query.area;
-  if (!area) return res.status(400).json({ error: 'area param required' });
+router.get('/areas/:area/stats', async (req, res) => {
+  const area = req.params.area;
   const tc = timeClause(req.query, 3);
   const qParams = [...areaParams(area), ...tc.params];
 
@@ -338,7 +338,8 @@ function computePrediction({
   };
 }
 
-// GET /api/prediction?area=<area_name_he>
+// GET /api/areas/:area/prediction
+// :area is the Hebrew area_name_he, URL-encoded in the path.
 // Multi-factor probability model for attack in the next hour.
 //
 // Factors combined via log-odds (logistic) approach:
@@ -347,9 +348,8 @@ function computePrediction({
 //   3. Trend       — last-24 h alert rate vs overall rate
 //   4. Momentum    — exponential decay from time since last alert
 //   5. Day-of-week — current weekday's frequency vs average
-router.get('/prediction', async (req, res) => {
-  const area = req.query.area;
-  if (!area) return res.status(400).json({ error: 'area param required' });
+router.get('/areas/:area/prediction', async (req, res) => {
+  const area = req.params.area;
 
   try {
     const predFilter = `${areaClause(1)} AND ${EXCLUDE_FILTER}`;
