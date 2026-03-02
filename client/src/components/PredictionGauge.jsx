@@ -12,109 +12,162 @@ const RISK_CONFIG = {
 };
 
 const FACTOR_LABELS = {
-  baseRate:      { name: 'Base Rate',      desc: 'Historical alert frequency' },
-  hourlyFactor:  { name: 'Hour Pattern',   desc: 'Current hour vs average' },
-  trendFactor:   { name: '24h Trend',      desc: 'Recent rate vs overall' },
-  momentumScore: { name: 'Momentum',       desc: 'Time since last alert' },
-  dowFactor:     { name: 'Day of Week',    desc: 'Current weekday pattern' },
+  baseRate:      'Base Rate',
+  hourlyFactor:  'Hour Pattern',
+  trendFactor:   '24h Trend',
+  momentumScore: 'Momentum',
+  dowFactor:     'Day of Week',
 };
 
-function factorBar(value, key) {
-  // Normalize factor to 0–1 range for display
-  // baseRate & momentumScore are already 0–1
-  // hourlyFactor, trendFactor, dowFactor are ratios around 1.0
+function factorNorm(value, key) {
   if (key === 'baseRate' || key === 'momentumScore') return Math.min(value, 1);
-  // For ratio-based factors: 0→0, 1→0.5, 2+→1
   return Math.min(value / 2, 1);
 }
 
-function factorColor(value, key) {
-  const norm = factorBar(value, key);
+function factorColor(norm) {
   if (norm < 0.25) return '#22c55e';
   if (norm < 0.5)  return '#eab308';
   if (norm < 0.75) return '#f97316';
   return '#ef4444';
 }
 
-// SVG semi-circular gauge
+/* ── Gauge — clean arc with discrete colour segments ────────────────── */
 function Gauge({ probability, riskLevel }) {
   const cfg = RISK_CONFIG[riskLevel] || RISK_CONFIG.none;
   const pct = Math.round(probability * 100);
 
-  // Arc geometry
-  const cx = 100, cy = 90;
-  const r = 72;
-  const strokeWidth = 12;
+  const cx = 120, cy = 100;
+  const r = 80;
+  const sw = 10; // stroke width
 
-  // Start at 180° (left), end at 0° (right) — semi-circle
-  const startAngle = Math.PI;
-  const sweepAngle = Math.PI * Math.min(probability, 1);
+  /* Semi-circle: π → 0  (left to right) */
+  const arcPath = (startPct, endPct) => {
+    const a1 = Math.PI * (1 - startPct);
+    const a2 = Math.PI * (1 - endPct);
+    const x1 = cx + r * Math.cos(a1);
+    const y1 = cy - r * Math.sin(a1);
+    const x2 = cx + r * Math.cos(a2);
+    const y2 = cy - r * Math.sin(a2);
+    const large = (endPct - startPct) > 0.5 ? 1 : 0;
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+  };
 
-  // Background arc (full semi-circle)
-  const bgX1 = cx + r * Math.cos(Math.PI);
-  const bgY1 = cy - r * Math.sin(Math.PI);
-  const bgX2 = cx + r * Math.cos(0);
-  const bgY2 = cy - r * Math.sin(0);
+  /* Discrete segments: green → yellow → orange → red */
+  const segments = [
+    { from: 0,    to: 0.25, color: '#22c55e' },
+    { from: 0.25, to: 0.50, color: '#eab308' },
+    { from: 0.50, to: 0.75, color: '#f97316' },
+    { from: 0.75, to: 1.00, color: '#ef4444' },
+  ];
 
-  // Foreground arc endpoint
-  const fgAngle = startAngle - sweepAngle;
-  const fgX = cx + r * Math.cos(fgAngle);
-  const fgY = cy - r * Math.sin(fgAngle);
-  const largeArc = probability > 0.5 ? 1 : 0;
-
-  // Gradient stops for the arc
-  const gradientId = 'gaugeGrad';
+  /* Needle angle */
+  const needleAngle = Math.PI * (1 - Math.min(probability, 1));
+  const needleLen = r - 20;
+  const nx = cx + needleLen * Math.cos(needleAngle);
+  const ny = cy - needleLen * Math.sin(needleAngle);
 
   return (
-    <svg viewBox="0 0 200 110" width="100%" style={{ maxWidth: 220, display: 'block', margin: '0 auto' }}>
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#22c55e" />
-          <stop offset="35%" stopColor="#eab308" />
-          <stop offset="65%" stopColor="#f97316" />
-          <stop offset="100%" stopColor="#ef4444" />
-        </linearGradient>
-      </defs>
-
-      {/* Background arc */}
+    <svg viewBox="0 0 240 130" width="100%" style={{ maxWidth: 240, display: 'block', margin: '0 auto' }}>
+      {/* Background track */}
       <path
-        d={`M ${bgX1} ${bgY1} A ${r} ${r} 0 0 1 ${bgX2} ${bgY2}`}
+        d={arcPath(0, 1)}
         fill="none"
         stroke="rgba(255,255,255,0.06)"
-        strokeWidth={strokeWidth}
+        strokeWidth={sw + 4}
         strokeLinecap="round"
       />
 
-      {/* Foreground arc */}
-      {probability > 0.001 && (
-        <path
-          d={`M ${bgX1} ${bgY1} A ${r} ${r} 0 ${largeArc} 1 ${fgX} ${fgY}`}
-          fill="none"
-          stroke={`url(#${gradientId})`}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-        />
-      )}
+      {/* Coloured segments (dimmed for unlit portion, bright for lit) */}
+      {segments.map((seg, i) => {
+        const segEnd = Math.min(probability, seg.to);
+        if (segEnd <= seg.from) {
+          // Not reached — dim
+          return (
+            <path key={i} d={arcPath(seg.from, seg.to)} fill="none"
+              stroke={seg.color} strokeWidth={sw} strokeLinecap="butt"
+              opacity={0.12}
+            />
+          );
+        }
+        // Partially or fully lit
+        const litEnd = Math.min(probability, seg.to);
+        return (
+          <g key={i}>
+            {/* Dim remainder if partially lit */}
+            {litEnd < seg.to && (
+              <path d={arcPath(litEnd, seg.to)} fill="none"
+                stroke={seg.color} strokeWidth={sw} strokeLinecap="butt"
+                opacity={0.12}
+              />
+            )}
+            {/* Bright lit portion */}
+            <path d={arcPath(seg.from, litEnd)} fill="none"
+              stroke={seg.color} strokeWidth={sw} strokeLinecap="butt"
+              opacity={0.9}
+            />
+          </g>
+        );
+      })}
+
+      {/* Needle */}
+      <line x1={cx} y1={cy} x2={nx} y2={ny}
+        stroke="#fff" strokeWidth={2} strokeLinecap="round" opacity={0.85}
+      />
+      <circle cx={cx} cy={cy} r={4} fill="#fff" opacity={0.7} />
 
       {/* Percentage text */}
-      <text x={cx} y={cy - 10} textAnchor="middle" fill="#fff" fontSize="28" fontWeight="700"
+      <text x={cx} y={cy - 22} textAnchor="middle" fill="#fff" fontSize="32" fontWeight="700"
         fontFamily="system-ui, sans-serif">
         {pct}%
       </text>
 
       {/* Risk label */}
-      <text x={cx} y={cy + 12} textAnchor="middle" fill={cfg.color} fontSize="12" fontWeight="600"
-        fontFamily="system-ui, sans-serif" textTransform="uppercase" letterSpacing="1">
+      <text x={cx} y={cy - 4} textAnchor="middle" fill={cfg.color} fontSize="13" fontWeight="600"
+        fontFamily="system-ui, sans-serif">
         {cfg.label}
       </text>
 
       {/* Scale labels */}
-      <text x={28 - 8} y={cy + 8} fill="#555" fontSize="9" fontFamily="system-ui, sans-serif">0%</text>
-      <text x={200 - 28 - 6} y={cy + 8} fill="#555" fontSize="9" fontFamily="system-ui, sans-serif">100%</text>
+      <text x={32} y={cy + 16} fill="#555" fontSize="9" textAnchor="middle"
+        fontFamily="system-ui, sans-serif">0%</text>
+      <text x={208} y={cy + 16} fill="#555" fontSize="9" textAnchor="middle"
+        fontFamily="system-ui, sans-serif">100%</text>
     </svg>
   );
 }
 
+/* ── Factor Row ─────────────────────────────────────────────────────── */
+function FactorRow({ name, value, factorKey }) {
+  const norm = factorNorm(value, factorKey);
+  const color = factorColor(norm);
+  const display = (factorKey === 'baseRate' || factorKey === 'momentumScore')
+    ? `${(value * 100).toFixed(1)}%`
+    : `${value.toFixed(2)}x`;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ fontSize: 11, color: '#777', width: 80, flexShrink: 0 }}>{name}</span>
+      <div style={{
+        flex: 1, height: 3, borderRadius: 2,
+        background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%',
+          width: `${Math.max(norm * 100, 2)}%`,
+          borderRadius: 2,
+          background: color,
+          opacity: 0.7,
+          transition: 'width 0.4s ease',
+        }} />
+      </div>
+      <span style={{ fontSize: 11, color: '#555', width: 44, textAlign: 'right', flexShrink: 0 }}>
+        {display}
+      </span>
+    </div>
+  );
+}
+
+/* ── Main Component ─────────────────────────────────────────────────── */
 export default function PredictionGauge({ area }) {
   const [prediction, setPrediction] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -129,7 +182,6 @@ export default function PredictionGauge({ area }) {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
 
-    // Refresh prediction every 60 seconds
     const id = setInterval(() => {
       fetchPrediction(area).then(setPrediction).catch(() => {});
     }, 60_000);
@@ -140,8 +192,7 @@ export default function PredictionGauge({ area }) {
   if (loading && !prediction) {
     return <div style={{ padding: '12px 0', color: '#555', fontSize: 12, textAlign: 'center' }}>Calculating…</div>;
   }
-  if (error && !prediction) return null; // silently skip on error
-
+  if (error && !prediction) return null;
   if (!prediction) return null;
 
   const { probability, riskLevel, factors, meta } = prediction;
@@ -158,59 +209,40 @@ export default function PredictionGauge({ area }) {
       <div style={{
         background: 'rgba(255,255,255,0.03)',
         borderRadius: 12,
-        padding: '16px 12px 12px',
+        padding: '14px 16px 12px',
         border: `1px solid ${cfg.color}22`,
       }}>
         <Gauge probability={probability} riskLevel={riskLevel} />
 
         {/* Factor breakdown */}
-        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 7 }}>
           {Object.entries(factors).map(([key, value]) => {
-            const info = FACTOR_LABELS[key];
-            if (!info) return null;
-            const norm = factorBar(value, key);
-            const color = factorColor(value, key);
-            return (
-              <div key={key}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                  <span style={{ fontSize: 11, color: '#aaa' }}>{info.name}</span>
-                  <span style={{ fontSize: 11, color: '#666' }}>
-                    {key === 'baseRate' || key === 'momentumScore'
-                      ? `${(value * 100).toFixed(1)}%`
-                      : `${value.toFixed(2)}x`}
-                  </span>
-                </div>
-                <div style={{
-                  height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
-                }}>
-                  <div style={{
-                    height: '100%', width: `${Math.max(norm * 100, 1)}%`, borderRadius: 2,
-                    background: color, transition: 'width 0.4s ease',
-                  }} />
-                </div>
-              </div>
-            );
+            const name = FACTOR_LABELS[key];
+            if (!name) return null;
+            return <FactorRow key={key} name={name} value={value} factorKey={key} />;
           })}
         </div>
 
         {/* Meta info */}
-        <div style={{
-          marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.05)',
-          display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 10, color: '#555',
-        }}>
-          {meta.alertsLast24h != null && (
-            <span>{meta.alertsLast24h} alerts in 24h</span>
-          )}
-          {meta.hoursSinceLastAlert != null && (
-            <span>Last alert {meta.hoursSinceLastAlert < 1
-              ? `${Math.round(meta.hoursSinceLastAlert * 60)}m ago`
-              : `${meta.hoursSinceLastAlert.toFixed(1)}h ago`}
-            </span>
-          )}
-          {meta.totalAlerts > 0 && (
-            <span>{meta.totalAlerts} total in {meta.observationHours.toFixed(0)}h window</span>
-          )}
-        </div>
+        {meta && (
+          <div style={{
+            marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex', flexWrap: 'wrap', gap: '3px 14px', fontSize: 10, color: '#444',
+          }}>
+            {meta.alertsLast24h != null && (
+              <span>{meta.alertsLast24h} alerts in 24h</span>
+            )}
+            {meta.hoursSinceLastAlert != null && (
+              <span>Last alert {meta.hoursSinceLastAlert < 1
+                ? `${Math.round(meta.hoursSinceLastAlert * 60)}m ago`
+                : `${meta.hoursSinceLastAlert.toFixed(1)}h ago`}
+              </span>
+            )}
+            {meta.totalAlerts > 0 && (
+              <span>{meta.totalAlerts} total in {meta.observationHours.toFixed(0)}h window</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ const CATEGORY_MAP = {
   7:  'Hostile Aircraft',
   8:  'Unconventional Missile',
   9:  'Infrastructure Hazard',
-  10: 'Terrorist Infiltration',
+  10: 'Pre-Alert',
   13: 'All Clear',
 };
 
