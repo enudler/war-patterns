@@ -34,6 +34,64 @@ function formatTs(ts) {
   });
 }
 
+function NotificationSetup() {
+  const supported = 'Notification' in window;
+  const [perm, setPerm] = useState(supported ? Notification.permission : 'unsupported');
+
+  async function handleEnable() {
+    const result = await Notification.requestPermission();
+    setPerm(result);
+  }
+
+  if (!supported || perm === 'granted') return null;
+
+  if (perm === 'denied') {
+    return (
+      <div style={{ marginTop: 10, fontSize: 11, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>🔕</span>
+        <span>Alarm notifications blocked — allow them in browser settings</span>
+      </div>
+    );
+  }
+
+  // perm === 'default'
+  return (
+    <div style={{
+      marginTop: 10,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      background: 'rgba(239,68,68,0.08)',
+      border: '1px solid rgba(239,68,68,0.2)',
+      borderRadius: 6,
+      padding: '7px 12px',
+      gap: 10,
+    }}>
+      <span style={{ fontSize: 12, color: '#fca5a5', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>🔔</span>
+        <span>Get notified when your area is under alarm</span>
+      </span>
+      <button
+        onClick={handleEnable}
+        style={{
+          background: '#ef4444',
+          color: '#fff',
+          border: 'none',
+          borderRadius: 5,
+          padding: '4px 12px',
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
+      >
+        Enable
+      </button>
+    </div>
+  );
+}
+
 export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea, favoriteAreaLabel, onToggleFavorite, onSelectArea, areas, days, onDaysChange, summary, dataStatus }) {
   const availableDays = dataStatus?.oldest
     ? Math.floor((Date.now() - new Date(dataStatus.oldest).getTime()) / 86_400_000)
@@ -126,6 +184,7 @@ export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea,
             {days === 'today' ? 'today' : `in ${days} day${days !== 1 ? 's' : ''}`}
           </div>
         )}
+        <NotificationSetup />
       </div>
 
       {/* Time Range Selector */}

@@ -8,12 +8,6 @@ const REFRESH_INTERVAL_MS = 30_000;
 const LIVE_POLL_MS = 5_000;
 const ALL_CLEAR_DURATION_MS = 8_000;
 
-function requestNotificationPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission().catch(() => {});
-  }
-}
-
 function showBrowserNotification(alarm, areaLabel) {
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
@@ -100,9 +94,6 @@ export default function App() {
       { timeout: 6000, maximumAge: 300_000 }
     );
   }, [allAreas]);
-
-  // Request notification permission once on load.
-  useEffect(() => { requestNotificationPermission(); }, []);
 
   // Poll the live oref feed every 5s and trigger the overlay if selected area is under alarm.
   useEffect(() => {
