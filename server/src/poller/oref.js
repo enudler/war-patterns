@@ -151,5 +151,23 @@ function startPoller(intervalMs = 15000) {
   };
 }
 
-module.exports = { startPoller };
+// Returns the current live alert state directly from the oref API (no DB).
+// { active: false, areas: [] } when quiet.
+// { active: true, areas: [...hebrewNames], category, categoryDesc, alertDate } when firing.
+async function getLiveAlerts() {
+  const raw = await fetchAlerts(LIVE_URL);
+  if (!raw.length) return { active: false, areas: [] };
+  const category = parseInt(raw[0].category ?? 0, 10);
+  const areas = raw.map((r) => r.data).filter(Boolean);
+  if (!areas.length) return { active: false, areas: [] };
+  return {
+    active: true,
+    areas,
+    category,
+    categoryDesc: CATEGORY_MAP[category] || `Unknown (${category})`,
+    alertDate: raw[0].alertDate,
+  };
+}
+
+module.exports = { startPoller, getLiveAlerts };
 module.exports._test = { geocode, makeOrefId, fetchAlerts };

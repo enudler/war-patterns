@@ -16,6 +16,17 @@ html, body, #root {
   background: #1a1a2e;
 }
 
+/* Alarm overlay animations */
+@keyframes alarm-pulse {
+  0%, 100% { background-color: rgba(160, 0, 0, 0.92); }
+  50%       { background-color: rgba(220, 0, 0, 0.97); }
+}
+
+@keyframes alarm-banner-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.75; }
+}
+
 /* Mobile layout */
 @media (max-width: 768px) {
   .app-layout {

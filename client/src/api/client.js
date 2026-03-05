@@ -52,3 +52,10 @@ export async function fetchPredictionTimeline(area, hours = 12) {
   );
   return data;
 }
+
+// Returns current active alert state directly from the oref live feed (no DB, no delay).
+// { active: false, areas: [] } or { active: true, areas, category, categoryDesc, alertDate }
+export async function fetchLiveStatus() {
+  const { data } = await api.get('/api/live');
+  return data;
+}

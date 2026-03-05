@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db/index');
 const areasData = require('../data/areas.json');
+const { getLiveAlerts } = require('../poller/oref');
 
 const router = express.Router();
 
@@ -696,6 +697,16 @@ router.get('/status', async (_req, res) => {
   } catch (err) {
     console.error('[/status]', err.message, err.stack);
     res.status(500).json(sanitizeError(err));
+  }
+});
+
+// GET /api/live — current active alerts from the oref live feed (no DB, no delay).
+// { active: false, areas: [] } or { active: true, areas, category, categoryDesc, alertDate }
+router.get('/live', async (_req, res) => {
+  try {
+    res.json(await getLiveAlerts());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
