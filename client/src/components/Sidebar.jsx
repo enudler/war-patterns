@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { fetchStats, fetchAlerts } from '../api/client';
 import { DailyBarChart, HourlyBarChart, TypePieChart } from './Charts';
 import PredictionGauge from './PredictionGauge';
+import LocationSearch from './LocationSearch';
 
 const DAY_OPTIONS = [
   { value: 'today', label: 'Today' },
@@ -33,7 +34,7 @@ function formatTs(ts) {
   });
 }
 
-export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea, favoriteAreaLabel, onToggleFavorite, days, onDaysChange, summary, dataStatus }) {
+export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea, favoriteAreaLabel, onToggleFavorite, onSelectArea, areas, days, onDaysChange, summary, dataStatus }) {
   const availableDays = dataStatus?.oldest
     ? Math.floor((Date.now() - new Date(dataStatus.oldest).getTime()) / 86_400_000)
     : null;
@@ -80,8 +81,11 @@ export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea,
     <div className="app-sidebar" style={sidebarStyle}>
       {/* Header */}
       <div style={{ padding: '18px 20px 10px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-        <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+        <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
           War Patterns · Israel Alert Tracker
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <LocationSearch areas={areas} onSelectArea={onSelectArea} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: '#fff', flex: 1, wordBreak: 'break-word' }}>

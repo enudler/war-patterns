@@ -179,6 +179,8 @@ export default function App() {
         favoriteArea={favoriteArea}
         favoriteAreaLabel={favoriteAreaLabel}
         onToggleFavorite={toggleFavorite}
+        onSelectArea={setSelectedArea}
+        areas={mergedAreas}
         days={days}
         onDaysChange={setDays}
         summary={summary}
