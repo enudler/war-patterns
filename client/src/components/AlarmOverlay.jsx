@@ -9,7 +9,7 @@ function CategoryIcon({ category }) {
   return <span style={{ fontSize: 64, display: 'block', marginBottom: 8 }}>{CATEGORY_ICON[category] ?? '🚨'}</span>;
 }
 
-export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel }) {
+export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDismiss }) {
   const [dismissed, setDismissed] = useState(false);
   const lastAlertDate = useRef(null);
 
@@ -64,7 +64,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel }) {
           {alarm.alertDate ? new Date(alarm.alertDate.replace(' ', 'T')).toLocaleTimeString() : ''}
         </div>
         <button
-          onClick={() => setDismissed(true)}
+          onClick={() => { setDismissed(true); onDismiss?.(); }}
           style={{
             background: 'rgba(255,255,255,0.15)',
             color: '#fff',

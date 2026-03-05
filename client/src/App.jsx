@@ -8,6 +8,48 @@ const REFRESH_INTERVAL_MS = 30_000;
 const LIVE_POLL_MS = 5_000;
 const ALL_CLEAR_DURATION_MS = 8_000;
 
+// Synthesise a repeating air-raid siren using the Web Audio API.
+// Returns { stop() } or null when the API is unavailable.
+// The siren sweeps from ~330 Hz to ~990 Hz and back, cycling every 2.5 s.
+function createAlarmSound() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  try {
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.value = 660;   // centre frequency
+
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.4;   // one sweep every 2.5 s
+    lfoGain.gain.value = 330;    // ±330 Hz → sweeps 330–990 Hz
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.value = 0.25;
+
+    // resume() is required by browser autoplay policy
+    ctx.resume().then(() => { lfo.start(); osc.start(); }).catch(() => {});
+
+    return {
+      stop() {
+        try {
+          gain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
+          setTimeout(() => ctx.close().catch(() => {}), 400);
+        } catch {}
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 function showBrowserNotification(alarm, areaLabel) {
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
@@ -56,6 +98,7 @@ export default function App() {
   // Tracks the 3-minute-bucketed alertDate of the currently displayed alarm so
   // that repeated polls for the same active alert don't reset the overlay.
   const activeAlarmBucketRef = useRef(null);
+  const alarmSoundRef = useRef(null); // currently playing siren instance
 
   function toggleFavorite(areaNameHe) {
     if (favoriteArea === areaNameHe) {
@@ -110,20 +153,26 @@ export default function App() {
             : 'unknown';
 
           if (!prevAlarmActive.current) {
-            // Alarm just started — show notification and overlay.
+            // Alarm just started — show notification, overlay and siren.
             showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
             setActiveAlarm(live);
             activeAlarmBucketRef.current = bucket;
             prevAlarmActive.current = true;
+            alarmSoundRef.current = createAlarmSound();
           } else if (bucket !== activeAlarmBucketRef.current) {
             // Same area, but a genuinely new alarm event (different 3-min bucket).
             showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
             setActiveAlarm(live);
             activeAlarmBucketRef.current = bucket;
+            // Restart siren for the new event.
+            alarmSoundRef.current?.stop();
+            alarmSoundRef.current = createAlarmSound();
           }
           // else: same alarm still active — don't touch state, overlay stays as-is.
         } else {
           if (prevAlarmActive.current) {
+            alarmSoundRef.current?.stop();
+            alarmSoundRef.current = null;
             setAlarmCleared(true);
             clearTimeout(alarmClearedTimer.current);
             alarmClearedTimer.current = setTimeout(
@@ -143,6 +192,8 @@ export default function App() {
     return () => {
       clearInterval(id);
       clearTimeout(alarmClearedTimer.current);
+      alarmSoundRef.current?.stop();
+      alarmSoundRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArea]);
@@ -203,6 +254,7 @@ export default function App() {
         alarm={activeAlarm}
         cleared={alarmCleared}
         monitoredAreaLabel={selectedAreaLabel}
+        onDismiss={() => { alarmSoundRef.current?.stop(); alarmSoundRef.current = null; }}
       />
       <div className="app-map-pane" style={{ flex: 1, position: 'relative' }}>
         {error && (
