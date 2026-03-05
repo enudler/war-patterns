@@ -701,10 +701,38 @@ router.get('/status', async (_req, res) => {
 });
 
 // GET /api/live — current active alerts from the oref live feed (no DB, no delay).
-// { active: false, areas: [] } or { active: true, areas, category, categoryDesc, alertDate }
-router.get('/live', async (_req, res) => {
+//
+// Without ?area:  { active: false, areas: [] } or { active: true, areas, category, categoryDesc, alertDate }
+// With ?area=<hebrewName>: performs base-city match on the server.
+//   → { active: bool, category?, categoryDesc?, alertDate? }
+//   The `areas` array is omitted — the caller only needs the boolean.
+router.get('/live', async (req, res) => {
   try {
-    res.json(await getLiveAlerts());
+    const live = await getLiveAlerts();
+
+    const areaFilter = typeof req.query.area === 'string' ? req.query.area.trim() : null;
+    if (!areaFilter) {
+      // No filter requested — return full payload as before.
+      return res.json(live);
+    }
+
+    // Server-side base-city match: strip " - <suffix>" from both sides before comparing.
+    const base = baseAreaName(areaFilter);
+    const matched = live.active && live.areas.some(
+      (a) => baseAreaName(a) === base
+    );
+
+    if (!matched) {
+      return res.json({ active: false });
+    }
+
+    // Return the alarm metadata but omit the full areas list.
+    return res.json({
+      active: true,
+      category:     live.category,
+      categoryDesc: live.categoryDesc,
+      alertDate:    live.alertDate,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

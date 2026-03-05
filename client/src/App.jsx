@@ -8,12 +8,6 @@ const REFRESH_INTERVAL_MS = 30_000;
 const LIVE_POLL_MS = 5_000;
 const ALL_CLEAR_DURATION_MS = 8_000;
 
-// Returns true if any area in liveAreas shares the same base city as areaNameHe.
-function isAreaMatch(liveAreas, areaNameHe) {
-  const base = areaNameHe.replace(/ - .*$/, '').trim();
-  return liveAreas.some((a) => a.replace(/ - .*$/, '').trim() === base);
-}
-
 function requestNotificationPermission() {
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission().catch(() => {});
@@ -111,10 +105,8 @@ export default function App() {
   useEffect(() => {
     async function checkLive() {
       try {
-        const live = await fetchLiveStatus();
-        const isAlarming = live.active && selectedArea
-          ? isAreaMatch(live.areas, selectedArea)
-          : false;
+        const live = await fetchLiveStatus(selectedArea || undefined);
+        const isAlarming = live.active;
 
         if (isAlarming) {
           if (!prevAlarmActive.current) {
