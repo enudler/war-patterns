@@ -59,6 +59,9 @@ export default function App() {
   const prevAlarmActive = useRef(false);
   const alarmClearedTimer = useRef(null);
   const selectedAreaLabelRef = useRef(null);
+  // Tracks the 3-minute-bucketed alertDate of the currently displayed alarm so
+  // that repeated polls for the same active alert don't reset the overlay.
+  const activeAlarmBucketRef = useRef(null);
 
   function toggleFavorite(areaNameHe) {
     if (favoriteArea === areaNameHe) {
@@ -109,11 +112,25 @@ export default function App() {
         const isAlarming = live.active;
 
         if (isAlarming) {
+          // Compute a stable 3-minute bucket ID so repeated polls for the same
+          // active alert don't create a new alarm object and reset the overlay.
+          const bucket = live.alertDate
+            ? String(Math.floor(new Date(live.alertDate.replace(' ', 'T')).getTime() / (3 * 60_000)))
+            : 'unknown';
+
           if (!prevAlarmActive.current) {
+            // Alarm just started — show notification and overlay.
             showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
+            setActiveAlarm(live);
+            activeAlarmBucketRef.current = bucket;
+            prevAlarmActive.current = true;
+          } else if (bucket !== activeAlarmBucketRef.current) {
+            // Same area, but a genuinely new alarm event (different 3-min bucket).
+            showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
+            setActiveAlarm(live);
+            activeAlarmBucketRef.current = bucket;
           }
-          setActiveAlarm(live);
-          prevAlarmActive.current = true;
+          // else: same alarm still active — don't touch state, overlay stays as-is.
         } else {
           if (prevAlarmActive.current) {
             setAlarmCleared(true);
@@ -124,6 +141,7 @@ export default function App() {
             );
           }
           setActiveAlarm(null);
+          activeAlarmBucketRef.current = null;
           prevAlarmActive.current = false;
         }
       } catch {}
