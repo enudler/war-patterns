@@ -204,7 +204,12 @@ export default function App() {
   useEffect(() => {
     async function checkLive() {
       try {
-        const live = await fetchLiveStatus(selectedArea || undefined);
+        // Without a selected area we're in the global view — don't trigger the
+        // siren/overlay, which would cause a false alarm on every page load while
+        // auto-select (localStorage / geolocation) hasn't resolved yet.
+        if (!selectedArea) return;
+
+        const live = await fetchLiveStatus(selectedArea);
         const isAlarming = live.active;
 
         if (isAlarming) {
@@ -262,6 +267,10 @@ export default function App() {
       clearTimeout(alarmClearedTimer.current);
       alarmSoundRef.current?.stop();
       alarmSoundRef.current = null;
+      // Reset alarm tracking refs so the next effect run (e.g. after selectedArea
+      // changes) starts clean and doesn't trigger a false "all clear" event.
+      prevAlarmActive.current = false;
+      activeAlarmBucketRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArea]);
