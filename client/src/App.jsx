@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import MapView from './components/Map';
 import Sidebar from './components/Sidebar';
 import AlarmOverlay from './components/AlarmOverlay';
+import DebugPanel from './components/DebugPanel';
 import { fetchAreas, fetchSummary, fetchAllAreas, fetchStatus, fetchLiveStatus } from './api/client';
 
 const REFRESH_INTERVAL_MS = 30_000;
@@ -42,6 +43,67 @@ function createAlarmSound() {
         try {
           gain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
           setTimeout(() => ctx.close().catch(() => {}), 400);
+        } catch {}
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Gentle descending 3-tone chime for "danger passed" (cat 10 / cat 13).
+// One-shot — no stop() needed.
+function createStandDownSound() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return;
+  try {
+    const ctx = new AudioCtx();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.18;
+    gain.connect(ctx.destination);
+    ctx.resume().then(() => {
+      [880, 660, 440].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        osc.start(ctx.currentTime + i * 0.38);
+        osc.stop(ctx.currentTime + i * 0.38 + 0.30);
+      });
+      setTimeout(() => ctx.close().catch(() => {}), 1800);
+    }).catch(() => {});
+  } catch {}
+}
+
+// Soft repeating beep for category-14 "get ready / pre-alert".
+// Returns { stop() } or null when the API is unavailable.
+function createPreAlertSound() {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtx) return null;
+  try {
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 520;
+    gain.gain.value = 0;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    // Schedule 60 short beeps: 0.18 s on, 1.2 s off (covers ~1 min)
+    ctx.resume().then(() => {
+      osc.start();
+      for (let i = 0; i < 60; i++) {
+        const t = ctx.currentTime + i * 1.38;
+        gain.gain.setValueAtTime(0.14, t);
+        gain.gain.setValueAtTime(0,    t + 0.18);
+      }
+    }).catch(() => {});
+    return {
+      stop() {
+        try {
+          gain.gain.cancelScheduledValues(ctx.currentTime);
+          gain.gain.setValueAtTime(0, ctx.currentTime);
+          setTimeout(() => ctx.close().catch(() => {}), 200);
         } catch {}
       },
     };
@@ -152,27 +214,33 @@ export default function App() {
             ? String(Math.floor(new Date(live.alertDate.replace(' ', 'T')).getTime() / (3 * 60_000)))
             : 'unknown';
 
+          // Cat 14 = "get ready / stand by" → soft beep; all others → full siren.
+          const startSound = () =>
+            live.category === 14 ? createPreAlertSound() : createAlarmSound();
+
           if (!prevAlarmActive.current) {
-            // Alarm just started — show notification, overlay and siren.
+            // Alarm just started — show notification, overlay and sound.
             showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
             setActiveAlarm(live);
             activeAlarmBucketRef.current = bucket;
             prevAlarmActive.current = true;
-            alarmSoundRef.current = createAlarmSound();
+            alarmSoundRef.current = startSound();
           } else if (bucket !== activeAlarmBucketRef.current) {
             // Same area, but a genuinely new alarm event (different 3-min bucket).
             showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
             setActiveAlarm(live);
             activeAlarmBucketRef.current = bucket;
-            // Restart siren for the new event.
+            // Restart sound for the new event.
             alarmSoundRef.current?.stop();
-            alarmSoundRef.current = createAlarmSound();
+            alarmSoundRef.current = startSound();
           }
           // else: same alarm still active — don't touch state, overlay stays as-is.
         } else {
           if (prevAlarmActive.current) {
             alarmSoundRef.current?.stop();
             alarmSoundRef.current = null;
+            // Cat 10/13 from the server sets preAlert — play gentle chime.
+            if (live.preAlert) createStandDownSound();
             setAlarmCleared(true);
             clearTimeout(alarmClearedTimer.current);
             alarmClearedTimer.current = setTimeout(
@@ -248,14 +316,88 @@ export default function App() {
   // Keep ref in sync so the live-poll closure always has the latest English label.
   selectedAreaLabelRef.current = selectedAreaLabel;
 
+  // ── Debug panel (Ctrl/Cmd + Shift + D) ──────────────────────────────────────
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugAlarm, setDebugAlarm]   = useState(null);
+  const [debugCleared, setDebugCleared] = useState(false);
+  const debugSoundRef = useRef(null);
+
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        setDebugOpen((v) => !v);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  function handleDebugTrigger(scenario) {
+    // Stop any previously playing debug sound
+    debugSoundRef.current?.stop();
+    debugSoundRef.current = null;
+
+    if (scenario.id === 'reset') {
+      setDebugAlarm(null);
+      setDebugCleared(false);
+      return;
+    }
+
+    // Build a fresh alarm object with a unique alertDate so AlarmOverlay resets
+    const alarm = scenario.alarm
+      ? { ...scenario.alarm, alertDate: new Date().toISOString(), _debug: true }
+      : null;
+
+    if (scenario.dismissed) {
+      // Show in "dismissed → slim banner" state by setting a dismissed-at marker
+      setDebugAlarm({ ...alarm, _dismissed: true });
+      setDebugCleared(false);
+      if (alarm?.category === 14) debugSoundRef.current = createPreAlertSound();
+      else if (alarm)             debugSoundRef.current = createAlarmSound();
+    } else if (alarm) {
+      setDebugAlarm(alarm);
+      setDebugCleared(false);
+      if (alarm.category === 14) debugSoundRef.current = createPreAlertSound();
+      else                       debugSoundRef.current = createAlarmSound();
+    } else {
+      setDebugAlarm(null);
+      setDebugCleared(scenario.cleared ?? false);
+      if (scenario.playStandDown) createStandDownSound();
+    }
+
+    // Auto-clear after 8 s for toast scenarios
+    if (!alarm && scenario.cleared) {
+      setTimeout(() => setDebugCleared(false), ALL_CLEAR_DURATION_MS);
+    }
+  }
+
+  // Decide what the overlay should show:
+  // Real alarms take priority; debug overrides when there's no real alarm.
+  const overlayAlarm   = activeAlarm ?? debugAlarm;
+  const overlayCleared = alarmCleared || debugCleared;
+  // For dismissed-banner debug: AlarmOverlay tracks dismissed state internally,
+  // so we pass _dismissed hint via the alarm object and use an AlarmOverlayDebug
+  // wrapper that forces dismissed=true when the flag is present.
+
   return (
     <div className="app-layout" style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f0f1a' }}>
       <AlarmOverlay
-        alarm={activeAlarm}
-        cleared={alarmCleared}
-        monitoredAreaLabel={selectedAreaLabel}
-        onDismiss={() => { alarmSoundRef.current?.stop(); alarmSoundRef.current = null; }}
+        alarm={overlayAlarm}
+        cleared={overlayCleared}
+        monitoredAreaLabel={selectedAreaLabel ?? 'Test Area'}
+        forceDismissed={overlayAlarm?._dismissed ?? false}
+        onDismiss={() => {
+          alarmSoundRef.current?.stop(); alarmSoundRef.current = null;
+          debugSoundRef.current?.stop(); debugSoundRef.current = null;
+        }}
       />
+      {debugOpen && (
+        <DebugPanel
+          onTrigger={handleDebugTrigger}
+          onClose={() => setDebugOpen(false)}
+        />
+      )}
       <div className="app-map-pane" style={{ flex: 1, position: 'relative' }}>
         {error && (
           <div style={{

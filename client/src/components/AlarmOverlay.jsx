@@ -1,15 +1,36 @@
 import { useState, useEffect, useRef } from 'react';
 
 const CATEGORY_ICON = {
-  1: '🚀',
-  2: '🛸',
+  1:  '🚀',
+  2:  '🛸',
+  14: '⚠️',
 };
+
+// Cat 14 ("get ready") uses amber; everything else uses red.
+function alarmColors(category) {
+  if (category === 14) {
+    return {
+      overlayBg:  'rgba(146, 64, 14, 0.92)',   // amber-900
+      bannerBg:   '#78350f',                    // amber-900 dark
+      bannerText: '#fcd34d',                    // amber-300
+      bannerBorder: 'rgba(252,211,77,0.5)',
+      animation:  'alarm-banner-pulse 1.2s ease-in-out infinite',
+    };
+  }
+  return {
+    overlayBg:  'rgba(160, 0, 0, 0.92)',
+    bannerBg:   '#7f1d1d',
+    bannerText: '#fca5a5',
+    bannerBorder: 'rgba(252,165,165,0.5)',
+    animation:  'alarm-banner-pulse 1.2s ease-in-out infinite',
+  };
+}
 
 function CategoryIcon({ category }) {
   return <span style={{ fontSize: 64, display: 'block', marginBottom: 8 }}>{CATEGORY_ICON[category] ?? '🚨'}</span>;
 }
 
-export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDismiss }) {
+export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDismiss, forceDismissed = false }) {
   const [dismissed, setDismissed] = useState(false);
   const lastAlertDate = useRef(null);
 
@@ -28,7 +49,11 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
 
   if (!alarm && !cleared) return null;
 
-  if (alarm && !dismissed) {
+  // forceDismissed lets the debug panel jump straight to the slim-banner state.
+  const isDismissed = dismissed || forceDismissed;
+
+  if (alarm && !isDismissed) {
+    const colors = alarmColors(alarm.category);
     return (
       <div
         role="alert"
@@ -37,7 +62,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
           position: 'fixed',
           inset: 0,
           zIndex: 9999,
-          background: 'rgba(160, 0, 0, 0.92)',
+          background: colors.overlayBg,
           backdropFilter: 'blur(4px)',
           display: 'flex',
           flexDirection: 'column',
@@ -52,7 +77,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
       >
         <CategoryIcon category={alarm.category} />
         <div style={{ fontSize: 13, letterSpacing: 4, textTransform: 'uppercase', opacity: 0.8, marginBottom: 4 }}>
-          Active Alarm
+          {alarm.category === 14 ? 'Stand By — Get Ready' : 'Active Alarm'}
         </div>
         <h1 style={{ margin: '4px 0 8px', fontSize: 36, fontWeight: 700, letterSpacing: 1 }}>
           {alarm.categoryDesc}
@@ -82,7 +107,8 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
     );
   }
 
-  if (alarm && dismissed) {
+  if (alarm && isDismissed) {
+    const colors = alarmColors(alarm.category);
     return (
       <div
         style={{
@@ -91,8 +117,8 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
           left: 0,
           right: 0,
           zIndex: 9999,
-          background: '#7f1d1d',
-          color: '#fca5a5',
+          background: colors.bannerBg,
+          color: colors.bannerText,
           padding: '10px 20px',
           display: 'flex',
           alignItems: 'center',
@@ -100,19 +126,20 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
           gap: 12,
           fontFamily: 'system-ui, sans-serif',
           fontSize: 14,
-          animation: 'alarm-banner-pulse 1.2s ease-in-out infinite',
+          animation: colors.animation,
         }}
       >
         <span>{CATEGORY_ICON[alarm.category] ?? '🚨'}</span>
         <span>
-          <strong>ACTIVE ALARM</strong> — {alarm.categoryDesc} in {monitoredAreaLabel}
+          <strong>{alarm.category === 14 ? 'STAND BY' : 'ACTIVE ALARM'}</strong>{' '}
+          — {alarm.categoryDesc} in {monitoredAreaLabel}
         </span>
         <button
           onClick={() => setDismissed(false)}
           style={{
             background: 'none',
-            border: '1px solid rgba(252,165,165,0.5)',
-            color: '#fca5a5',
+            border: `1px solid ${colors.bannerBorder}`,
+            color: colors.bannerText,
             borderRadius: 4,
             padding: '2px 10px',
             fontSize: 12,
