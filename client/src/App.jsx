@@ -1,9 +1,23 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import MapView from './components/Map';
 import Sidebar from './components/Sidebar';
-import { fetchAreas, fetchSummary, fetchAllAreas, fetchStatus } from './api/client';
+import AlarmOverlay from './components/AlarmOverlay';
+import { fetchAreas, fetchSummary, fetchAllAreas, fetchStatus, fetchLiveStatus } from './api/client';
 
 const REFRESH_INTERVAL_MS = 30_000;
+const LIVE_POLL_MS = 5_000;
+const ALL_CLEAR_DURATION_MS = 8_000;
+
+function showBrowserNotification(alarm, areaLabel) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(`🚨 ${alarm.categoryDesc}`, {
+        body: `Active alert in ${areaLabel}`,
+        requireInteraction: true,
+      });
+    } catch {}
+  }
+}
 // v2 key: selectedArea is now area_name_he (Hebrew); old English values are incompatible
 const FAVORITE_KEY = 'war_patterns_favorite_area_v2';
 
@@ -33,7 +47,15 @@ export default function App() {
   const [dataStatus, setDataStatus] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState(null);
+  const [activeAlarm, setActiveAlarm] = useState(null);
+  const [alarmCleared, setAlarmCleared] = useState(false);
   const autoSelected = useRef(false);
+  const prevAlarmActive = useRef(false);
+  const alarmClearedTimer = useRef(null);
+  const selectedAreaLabelRef = useRef(null);
+  // Tracks the 3-minute-bucketed alertDate of the currently displayed alarm so
+  // that repeated polls for the same active alert don't reset the overlay.
+  const activeAlarmBucketRef = useRef(null);
 
   function toggleFavorite(areaNameHe) {
     if (favoriteArea === areaNameHe) {
@@ -72,6 +94,58 @@ export default function App() {
       { timeout: 6000, maximumAge: 300_000 }
     );
   }, [allAreas]);
+
+  // Poll the live oref feed every 5s and trigger the overlay if selected area is under alarm.
+  useEffect(() => {
+    async function checkLive() {
+      try {
+        const live = await fetchLiveStatus(selectedArea || undefined);
+        const isAlarming = live.active;
+
+        if (isAlarming) {
+          // Compute a stable 3-minute bucket ID so repeated polls for the same
+          // active alert don't create a new alarm object and reset the overlay.
+          const bucket = live.alertDate
+            ? String(Math.floor(new Date(live.alertDate.replace(' ', 'T')).getTime() / (3 * 60_000)))
+            : 'unknown';
+
+          if (!prevAlarmActive.current) {
+            // Alarm just started — show notification and overlay.
+            showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
+            setActiveAlarm(live);
+            activeAlarmBucketRef.current = bucket;
+            prevAlarmActive.current = true;
+          } else if (bucket !== activeAlarmBucketRef.current) {
+            // Same area, but a genuinely new alarm event (different 3-min bucket).
+            showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
+            setActiveAlarm(live);
+            activeAlarmBucketRef.current = bucket;
+          }
+          // else: same alarm still active — don't touch state, overlay stays as-is.
+        } else {
+          if (prevAlarmActive.current) {
+            setAlarmCleared(true);
+            clearTimeout(alarmClearedTimer.current);
+            alarmClearedTimer.current = setTimeout(
+              () => setAlarmCleared(false),
+              ALL_CLEAR_DURATION_MS
+            );
+          }
+          setActiveAlarm(null);
+          activeAlarmBucketRef.current = null;
+          prevAlarmActive.current = false;
+        }
+      } catch {}
+    }
+
+    checkLive();
+    const id = setInterval(checkLive, LIVE_POLL_MS);
+    return () => {
+      clearInterval(id);
+      clearTimeout(alarmClearedTimer.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedArea]);
 
   const loadAlerts = useCallback(async () => {
     try {
@@ -115,14 +189,21 @@ export default function App() {
   // Memoized separately since it depends on mergedAreas + selectedArea/favoriteArea
   const { selectedAreaLabel, favoriteAreaLabel } = useMemo(() => {
     const areaLabelMap = new Map(mergedAreas.map((a) => [a.area_name_he, a.area_name]));
-    return {
-      selectedAreaLabel: selectedArea ? (areaLabelMap.get(selectedArea) ?? selectedArea) : null,
-      favoriteAreaLabel: favoriteArea ? (areaLabelMap.get(favoriteArea) ?? favoriteArea) : null,
-    };
+    const selectedAreaLabel = selectedArea ? (areaLabelMap.get(selectedArea) ?? selectedArea) : null;
+    const favoriteAreaLabel = favoriteArea ? (areaLabelMap.get(favoriteArea) ?? favoriteArea) : null;
+    return { selectedAreaLabel, favoriteAreaLabel };
   }, [mergedAreas, selectedArea, favoriteArea]);
+
+  // Keep ref in sync so the live-poll closure always has the latest English label.
+  selectedAreaLabelRef.current = selectedAreaLabel;
 
   return (
     <div className="app-layout" style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden', background: '#0f0f1a' }}>
+      <AlarmOverlay
+        alarm={activeAlarm}
+        cleared={alarmCleared}
+        monitoredAreaLabel={selectedAreaLabel}
+      />
       <div className="app-map-pane" style={{ flex: 1, position: 'relative' }}>
         {error && (
           <div style={{
