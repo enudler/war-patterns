@@ -34,13 +34,13 @@ export function DailyBarChart({ data }) {
           tick={{ fill: '#aaa', fontSize: 11 }}
           tickFormatter={(v) => {
             const d = new Date(v);
-            return `${d.getMonth() + 1}/${d.getDate()}`;
+            return `${d.getDate()}/${d.getMonth() + 1}`;
           }}
         />
         <YAxis tick={{ fill: '#aaa', fontSize: 11 }} allowDecimals={false} />
         <Tooltip
           {...tooltipStyle}
-          labelFormatter={(v) => new Date(v).toLocaleDateString()}
+          labelFormatter={(v) => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
           formatter={(v) => [v, 'Alerts']}
         />
         <Bar dataKey="count" radius={[3, 3, 0, 0]}>

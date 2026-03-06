@@ -36,11 +36,15 @@ function formatTs(ts) {
 
 function NotificationSetup() {
   const supported = 'Notification' in window;
-  const [perm, setPerm] = useState(supported ? Notification.permission : 'unsupported');
+  // Read Notification.permission fresh on every render so that a previous grant
+  // (from another tab, session, or browser-level approval) is always reflected
+  // without relying on stale local state.
+  const perm = supported ? Notification.permission : 'unsupported';
+  const [, tick] = useState(0);
 
   async function handleEnable() {
-    const result = await Notification.requestPermission();
-    setPerm(result);
+    await Notification.requestPermission();
+    tick(n => n + 1); // force re-render to pick up new Notification.permission
   }
 
   if (!supported || perm === 'granted') return null;
@@ -139,8 +143,16 @@ export default function Sidebar({ selectedArea, selectedAreaLabel, favoriteArea,
     <div className="app-sidebar" style={sidebarStyle}>
       {/* Header */}
       <div style={{ padding: '18px 20px 10px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-        <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-          War Patterns · Israel Alert Tracker
+        <style>{`
+          @keyframes siren-spin  { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          @keyframes siren-glow  { 0%,100% { box-shadow: 0 0 5px 1px rgba(239,68,68,0.7); } 50% { box-shadow: 0 0 12px 5px rgba(239,68,68,1); } }
+        `}</style>
+        <div style={{ fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* Rotating siren beacon */}
+          <div style={{ width: 14, height: 14, borderRadius: '50%', border: '1.5px solid #ef4444', position: 'relative', overflow: 'hidden', flexShrink: 0, animation: 'siren-glow 0.9s ease-in-out infinite' }}>
+            <div style={{ position: 'absolute', inset: 0, background: 'conic-gradient(from 0deg, #ef4444 0deg 70deg, transparent 70deg 360deg)', animation: 'siren-spin 1.1s linear infinite' }} />
+          </div>
+          Israel Alert Tracker
         </div>
         <div style={{ marginBottom: 12 }}>
           <LocationSearch areas={areas} onSelectArea={onSelectArea} />
