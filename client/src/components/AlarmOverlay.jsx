@@ -6,6 +6,12 @@ const CATEGORY_ICON = {
   14: '⚠️',
 };
 
+const PHASE_META = {
+  preAlert: { icon: '⚠️', label: 'Get Ready' },
+  alarm:    { icon: '🚨', label: 'Active Alarm' },
+  allClear: { icon: '✓',  label: 'All Clear' },
+};
+
 // Cat 14 ("get ready") uses amber; everything else uses red.
 function alarmColors(category) {
   if (category === 14) {
@@ -26,11 +32,76 @@ function alarmColors(category) {
   };
 }
 
+function fmt(date) {
+  if (!date) return '';
+  return date instanceof Date
+    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '';
+}
+
+// Renders the incident timeline as a column of phase rows.
+function IncidentTimeline({ entries, style = {} }) {
+  if (!entries || entries.length === 0) return null;
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 3,
+      marginTop: 16,
+      padding: '10px 16px',
+      background: 'rgba(0,0,0,0.25)',
+      borderRadius: 6,
+      minWidth: 220,
+      ...style,
+    }}>
+      <div style={{ fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', opacity: 0.55, marginBottom: 4 }}>
+        Incident Timeline
+      </div>
+      {entries.map((entry, i) => {
+        const meta = PHASE_META[entry.phase] ?? { icon: '•', label: entry.phase };
+        const isLast = i === entries.length - 1;
+        return (
+          <div key={i} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 13,
+            opacity: isLast ? 1 : 0.65,
+            fontWeight: isLast ? 600 : 400,
+          }}>
+            <span style={{ width: 18, textAlign: 'center' }}>{meta.icon}</span>
+            <span style={{ flex: 1 }}>{meta.label}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(entry.time)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Compact inline timeline for the slim banner.
+function InlineTimeline({ entries }) {
+  if (!entries || entries.length === 0) return null;
+  return (
+    <span style={{ opacity: 0.65, fontSize: 11, fontFamily: 'monospace' }}>
+      {entries.map((e, i) => {
+        const meta = PHASE_META[e.phase] ?? { icon: '•' };
+        return (
+          <span key={i}>
+            {i > 0 && <span style={{ margin: '0 4px', opacity: 0.4 }}>·</span>}
+            {meta.icon} {fmt(e.time)}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function CategoryIcon({ category }) {
   return <span style={{ fontSize: 64, display: 'block', marginBottom: 8 }}>{CATEGORY_ICON[category] ?? '🚨'}</span>;
 }
 
-export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDismiss, forceDismissed = false }) {
+export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDismiss, forceDismissed = false, timeline = [] }) {
   const [dismissed, setDismissed] = useState(false);
   const lastAlertDate = useRef(null);
 
@@ -85,9 +156,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
         <div style={{ fontSize: 20, opacity: 0.9, marginBottom: 4 }}>
           {monitoredAreaLabel}
         </div>
-        <div style={{ fontSize: 13, opacity: 0.6, marginBottom: 32 }}>
-          {alarm.alertDate ? new Date(alarm.alertDate.replace(' ', 'T')).toLocaleTimeString() : ''}
-        </div>
+        <IncidentTimeline entries={timeline} />
         <button
           onClick={() => { setDismissed(true); onDismiss?.(); }}
           style={{
@@ -99,6 +168,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
             fontSize: 14,
             cursor: 'pointer',
             letterSpacing: 1,
+            marginTop: 20,
           }}
         >
           Dismiss
@@ -127,6 +197,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
           fontFamily: 'system-ui, sans-serif',
           fontSize: 14,
           animation: colors.animation,
+          flexWrap: 'wrap',
         }}
       >
         <span>{CATEGORY_ICON[alarm.category] ?? '🚨'}</span>
@@ -134,6 +205,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
           <strong>{alarm.category === 14 ? 'STAND BY' : 'ACTIVE ALARM'}</strong>{' '}
           — {alarm.categoryDesc} in {monitoredAreaLabel}
         </span>
+        <InlineTimeline entries={timeline} />
         <button
           onClick={() => setDismissed(false)}
           style={{
@@ -165,19 +237,42 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
           background: '#064e3b',
           color: '#6ee7b7',
           border: '1px solid #065f46',
-          padding: '12px 28px',
+          padding: '14px 28px',
           borderRadius: 8,
           fontSize: 16,
           fontFamily: 'system-ui, sans-serif',
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
-          gap: 10,
+          gap: 8,
           boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-          whiteSpace: 'nowrap',
+          minWidth: 220,
         }}
       >
-        <span style={{ fontSize: 20 }}>✓</span>
-        <span>All Clear — {monitoredAreaLabel}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 20 }}>✓</span>
+          <span>All Clear — {monitoredAreaLabel}</span>
+        </div>
+        {timeline.length > 0 && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+            width: '100%',
+            borderTop: '1px solid rgba(110,231,183,0.2)',
+            paddingTop: 6,
+          }}>
+            {timeline.map((entry, i) => {
+              const meta = PHASE_META[entry.phase] ?? { icon: '•', label: entry.phase };
+              return (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, opacity: 0.8, gap: 16 }}>
+                  <span>{meta.icon} {meta.label}</span>
+                  <span style={{ fontFamily: 'monospace' }}>{fmt(entry.time)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }
