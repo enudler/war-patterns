@@ -8,6 +8,7 @@ import { fetchAreas, fetchSummary, fetchAllAreas, fetchStatus, fetchLiveStatus }
 const REFRESH_INTERVAL_MS = 30_000;
 const LIVE_POLL_MS = 5_000;
 const ALL_CLEAR_DURATION_MS = 8_000;
+const TIMELINE_RESET_MS = 20 * 60 * 1_000; // 20 min — reset timeline if no new alarm
 
 // Synthesise a repeating air-raid siren using the Web Audio API.
 // Returns { stop() } or null when the API is unavailable.
@@ -153,8 +154,12 @@ export default function App() {
   const [error, setError] = useState(null);
   const [activeAlarm, setActiveAlarm] = useState(null);
   const [alarmCleared, setAlarmCleared] = useState(false);
+  // Timeline for the current incident: [{phase, time, alarm}]
+  // phase: 'preAlert' | 'alarm' | 'allClear'
+  const [alarmTimeline, setAlarmTimeline] = useState([]);
   const autoSelected = useRef(false);
   const prevAlarmActive = useRef(false);
+  const prevAlarmCategoryRef = useRef(null); // category of the currently active alarm
   const alarmClearedTimer = useRef(null);
   const selectedAreaLabelRef = useRef(null);
   // Tracks the 3-minute-bucketed alertDate of the currently displayed alarm so
@@ -162,6 +167,7 @@ export default function App() {
   const activeAlarmBucketRef = useRef(null);
   const lastPreAlertBucketRef = useRef(null); // tracks last cat-10/13 stand-down shown
   const alarmSoundRef = useRef(null); // currently playing siren instance
+  const timelineResetTimerRef = useRef(null); // 20-min idle timer to clear timeline
 
   function toggleFavorite(areaNameHe) {
     if (favoriteArea === areaNameHe) {
@@ -226,19 +232,36 @@ export default function App() {
 
           if (!prevAlarmActive.current) {
             // Alarm just started — show notification, overlay and sound.
+            clearTimeout(timelineResetTimerRef.current); // cancel any pending idle reset
             showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
             setActiveAlarm(live);
             activeAlarmBucketRef.current = bucket;
             prevAlarmActive.current = true;
+            prevAlarmCategoryRef.current = live.category;
             alarmSoundRef.current = startSound();
+            // Start a fresh timeline for this new incident.
+            const phase = live.category === 14 ? 'preAlert' : 'alarm';
+            setAlarmTimeline([{ phase, time: new Date(), alarm: live }]);
           } else if (bucket !== activeAlarmBucketRef.current) {
             // Same area, but a genuinely new alarm event (different 3-min bucket).
             showBrowserNotification(live, selectedAreaLabelRef.current ?? selectedArea);
+            clearTimeout(timelineResetTimerRef.current); // cancel any pending idle reset
+            const prevCat = prevAlarmCategoryRef.current;
+            const newCat  = live.category;
             setActiveAlarm(live);
             activeAlarmBucketRef.current = bucket;
+            prevAlarmCategoryRef.current = newCat;
             // Restart sound for the new event.
             alarmSoundRef.current?.stop();
             alarmSoundRef.current = startSound();
+            if (prevCat === 14 && (newCat === 1 || newCat === 2)) {
+              // Upgrade: "get ready" → actual alarm — append to current timeline.
+              setAlarmTimeline(prev => [...prev, { phase: 'alarm', time: new Date(), alarm: live }]);
+            } else {
+              // New or unrelated incident — reset timeline.
+              const phase = newCat === 14 ? 'preAlert' : 'alarm';
+              setAlarmTimeline([{ phase, time: new Date(), alarm: live }]);
+            }
           }
           // else: same alarm still active — don't touch state, overlay stays as-is.
         } else {
@@ -252,6 +275,10 @@ export default function App() {
               () => setAlarmCleared(false),
               ALL_CLEAR_DURATION_MS
             );
+            // Append all-clear to the incident timeline, then auto-reset after 20 min.
+            setAlarmTimeline(prev => [...prev, { phase: 'allClear', time: new Date() }]);
+            clearTimeout(timelineResetTimerRef.current);
+            timelineResetTimerRef.current = setTimeout(() => setAlarmTimeline([]), TIMELINE_RESET_MS);
           } else if (live.preAlert) {
             // Cat 10/13 arrived without us ever seeing the active alarm this session
             // (page opened mid-event, or area changed after cat 1/2 ended).
@@ -268,11 +295,16 @@ export default function App() {
                 () => setAlarmCleared(false),
                 ALL_CLEAR_DURATION_MS
               );
+              // All clear without a prior alarm in this session.
+              setAlarmTimeline(prev => [...prev, { phase: 'allClear', time: new Date() }]);
+              clearTimeout(timelineResetTimerRef.current);
+              timelineResetTimerRef.current = setTimeout(() => setAlarmTimeline([]), TIMELINE_RESET_MS);
             }
           }
           setActiveAlarm(null);
           activeAlarmBucketRef.current = null;
           prevAlarmActive.current = false;
+          prevAlarmCategoryRef.current = null;
         }
       } catch {}
     }
@@ -289,6 +321,9 @@ export default function App() {
       prevAlarmActive.current = false;
       activeAlarmBucketRef.current = null;
       lastPreAlertBucketRef.current = null;
+      prevAlarmCategoryRef.current = null;
+      clearTimeout(timelineResetTimerRef.current);
+      setAlarmTimeline([]);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArea]);
@@ -414,6 +449,7 @@ export default function App() {
         cleared={overlayCleared}
         monitoredAreaLabel={selectedAreaLabel ?? 'Test Area'}
         forceDismissed={overlayAlarm?._dismissed ?? false}
+        timeline={alarmTimeline}
         onDismiss={() => {
           alarmSoundRef.current?.stop(); alarmSoundRef.current = null;
           debugSoundRef.current?.stop(); debugSoundRef.current = null;
