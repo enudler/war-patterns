@@ -378,6 +378,19 @@ export default function App() {
   // Keep ref in sync so the live-poll closure always has the latest English label.
   selectedAreaLabelRef.current = selectedAreaLabel;
 
+  // Update the browser tab title to reflect alarm state.
+  useEffect(() => {
+    const area = selectedAreaLabel ?? selectedArea;
+    if (activeAlarm) {
+      const prefix = activeAlarm.category === 14 ? '⚠️ STAND BY' : '🚨 ALARM';
+      document.title = area ? `${prefix} — ${area}` : `${prefix} — War Patterns`;
+    } else if (alarmCleared) {
+      document.title = area ? `✅ All Clear — ${area}` : '✅ All Clear — War Patterns';
+    } else {
+      document.title = 'War Patterns';
+    }
+  }, [activeAlarm, alarmCleared, selectedAreaLabel, selectedArea]);
+
   // ── Debug panel (Ctrl/Cmd + Shift + D) ──────────────────────────────────────
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugAlarm, setDebugAlarm]   = useState(null);
