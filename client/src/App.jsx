@@ -52,7 +52,7 @@ function createAlarmSound() {
   }
 }
 
-// Gentle descending 3-tone chime for "danger passed" (cat 10 / cat 13).
+// Gentle descending 3-tone chime for "danger passed" (cat 13).
 // One-shot — no stop() needed.
 function createStandDownSound() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -165,7 +165,7 @@ export default function App() {
   // Tracks the 3-minute-bucketed alertDate of the currently displayed alarm so
   // that repeated polls for the same active alert don't reset the overlay.
   const activeAlarmBucketRef = useRef(null);
-  const lastPreAlertBucketRef = useRef(null); // tracks last cat-10/13 stand-down shown
+  const lastPreAlertBucketRef = useRef(null); // tracks last cat-13 stand-down shown
   const alarmSoundRef = useRef(null); // currently playing siren instance
   const timelineResetTimerRef = useRef(null); // 20-min idle timer to clear timeline
 
@@ -226,9 +226,9 @@ export default function App() {
             ? String(Math.floor(new Date(live.alertDate.replace(' ', 'T')).getTime() / (3 * 60_000)))
             : 'unknown';
 
-          // Cat 14 = "get ready / stand by" → soft beep; all others → full siren.
+          // Cat 10/14 = pre-alert → soft beep; all others → full siren.
           const startSound = () =>
-            live.category === 14 ? createPreAlertSound() : createAlarmSound();
+            (live.category === 10 || live.category === 14) ? createPreAlertSound() : createAlarmSound();
 
           if (!prevAlarmActive.current) {
             // Alarm just started — show notification, overlay and sound.
@@ -240,7 +240,7 @@ export default function App() {
             prevAlarmCategoryRef.current = live.category;
             alarmSoundRef.current = startSound();
             // Start a fresh timeline for this new incident.
-            const phase = live.category === 14 ? 'preAlert' : 'alarm';
+            const phase = (live.category === 10 || live.category === 14) ? 'preAlert' : 'alarm';
             setAlarmTimeline([{ phase, time: new Date(), alarm: live }]);
           } else if (bucket !== activeAlarmBucketRef.current) {
             // Same area, but a genuinely new alarm event (different 3-min bucket).
@@ -254,12 +254,12 @@ export default function App() {
             // Restart sound for the new event.
             alarmSoundRef.current?.stop();
             alarmSoundRef.current = startSound();
-            if (prevCat === 14 && (newCat === 1 || newCat === 2)) {
-              // Upgrade: "get ready" → actual alarm — append to current timeline.
+            if ((prevCat === 10 || prevCat === 14) && (newCat === 1 || newCat === 2)) {
+              // Upgrade: pre-alert → actual alarm — append to current timeline.
               setAlarmTimeline(prev => [...prev, { phase: 'alarm', time: new Date(), alarm: live }]);
             } else {
               // New or unrelated incident — reset timeline.
-              const phase = newCat === 14 ? 'preAlert' : 'alarm';
+              const phase = (newCat === 10 || newCat === 14) ? 'preAlert' : 'alarm';
               setAlarmTimeline([{ phase, time: new Date(), alarm: live }]);
             }
           }
