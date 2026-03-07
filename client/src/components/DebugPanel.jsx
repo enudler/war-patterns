@@ -23,6 +23,13 @@ const SCENARIOS = [
     cleared: false,
   },
   {
+    id: 'alarm-preAlert10',
+    label: '⚠️ Pre-Alert (cat 10)',
+    description: 'Amber overlay + soft beep',
+    alarm: { category: 10, categoryDesc: 'Pre-Alert', alertDate: null },
+    cleared: false,
+  },
+  {
     id: 'alarm-preAlert',
     label: '⚠️ Pre-Alert / Stand By (cat 14)',
     description: 'Amber overlay + soft beep',
@@ -38,7 +45,7 @@ const SCENARIOS = [
   },
   {
     id: 'standdown',
-    label: '🔔 Stand Down chime (cat 10/13)',
+    label: '🔔 Stand Down chime (cat 13)',
     description: 'Green toast + descending 3-tone chime',
     alarm: null,
     cleared: true,
@@ -54,7 +61,7 @@ const SCENARIOS = [
   },
   {
     id: 'dismissed-preAlert',
-    label: '⚠️ Pre-Alert alarm (dismissed → banner)',
+    label: '⚠️ Pre-Alert / Stand By (dismissed → banner)',
     description: 'Amber slim top banner',
     alarm: { category: 14, categoryDesc: 'Pre-Alert / Stand By', alertDate: null },
     cleared: false,
