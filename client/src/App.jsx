@@ -165,7 +165,7 @@ export default function App() {
   // Tracks the 3-minute-bucketed alertDate of the currently displayed alarm so
   // that repeated polls for the same active alert don't reset the overlay.
   const activeAlarmBucketRef = useRef(null);
-  const lastPreAlertBucketRef = useRef(null); // tracks last cat-13 stand-down shown
+  const lastAllClearBucketRef = useRef(null); // tracks last cat-13 stand-down shown
   const alarmSoundRef = useRef(null); // currently playing siren instance
   const timelineResetTimerRef = useRef(null); // 20-min idle timer to clear timeline
 
@@ -268,7 +268,7 @@ export default function App() {
           if (prevAlarmActive.current) {
             alarmSoundRef.current?.stop();
             alarmSoundRef.current = null;
-            if (live.preAlert) createStandDownSound();
+            if (live.allClear) createStandDownSound();
             setAlarmCleared(true);
             clearTimeout(alarmClearedTimer.current);
             alarmClearedTimer.current = setTimeout(
@@ -279,15 +279,15 @@ export default function App() {
             setAlarmTimeline(prev => [...prev, { phase: 'allClear', time: new Date() }]);
             clearTimeout(timelineResetTimerRef.current);
             timelineResetTimerRef.current = setTimeout(() => setAlarmTimeline([]), TIMELINE_RESET_MS);
-          } else if (live.preAlert) {
-            // Cat 10/13 arrived without us ever seeing the active alarm this session
+          } else if (live.allClear) {
+            // Cat 13 arrived without us ever seeing the active alarm this session
             // (page opened mid-event, or area changed after cat 1/2 ended).
-            // Use the same 3-min bucket dedup so we don't re-fire on every poll.
-            const preAlertBucket = live.alertDate
-              ? String(Math.floor(new Date(live.alertDate.replace(' ', 'T')).getTime() / (3 * 60_000)))
+            // Use the same 5-min bucket dedup so we don't re-fire on every poll.
+            const allClearBucket = live.alertDate
+              ? String(Math.floor(new Date(live.alertDate.replace(' ', 'T')).getTime() / (5 * 60_000)))
               : 'unknown';
-            if (preAlertBucket !== lastPreAlertBucketRef.current) {
-              lastPreAlertBucketRef.current = preAlertBucket;
+            if (allClearBucket !== lastAllClearBucketRef.current) {
+              lastAllClearBucketRef.current = allClearBucket;
               createStandDownSound();
               setAlarmCleared(true);
               clearTimeout(alarmClearedTimer.current);
@@ -320,7 +320,7 @@ export default function App() {
       // changes) starts clean and doesn't trigger a false "all clear" event.
       prevAlarmActive.current = false;
       activeAlarmBucketRef.current = null;
-      lastPreAlertBucketRef.current = null;
+      lastAllClearBucketRef.current = null;
       prevAlarmCategoryRef.current = null;
       clearTimeout(timelineResetTimerRef.current);
       setAlarmTimeline([]);

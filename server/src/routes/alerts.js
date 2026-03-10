@@ -38,29 +38,25 @@ function validateAreaParam(req, res, next) {
   next();
 }
 
-// Generate deduplication CTE for area-specific queries.
-// Uses 3-minute bucketing to collapse sibling sub-areas and polling duplicates.
-function dedupCte(predFilter) {
+// Gap-based deduplication: collapse consecutive alerts of the same category
+// that are less than 5 minutes apart.  Unlike fixed-bucket dedup, this works
+// regardless of where alerts fall relative to bucket boundaries.
+// `cols` lists the extra columns the outer query needs (besides alerted_at).
+function dedupCte(predFilter, cols = []) {
+  const extra = cols.length ? ', ' + cols.join(', ') : '';
   return `
-    WITH deduped AS (
-      SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
-        alerted_at
+    WITH ordered AS (
+      SELECT alerted_at${extra},
+             LAG(alerted_at) OVER (PARTITION BY category ORDER BY alerted_at) AS prev_at
       FROM alerts
       WHERE ${predFilter}
-      ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01'), category
-    )
-  `;
-}
-
-// Generate full deduplication CTE for stats queries (includes more columns).
-function dedupCteWithColumns(predFilter) {
-  return `
-    WITH deduped AS (
-      SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
-        alerted_at, category, category_desc
-      FROM alerts
-      WHERE ${predFilter}
-      ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01'), category
+      ORDER BY alerted_at
+    ),
+    deduped AS (
+      SELECT alerted_at${extra}
+      FROM ordered
+      WHERE prev_at IS NULL
+         OR alerted_at - prev_at >= INTERVAL '5 minutes'
     )
   `;
 }
@@ -138,11 +134,16 @@ router.get('/areas', async (req, res) => {
            AND lat IS NOT NULL
            AND ${EXCLUDE_FILTER}
        ),
-       deduped AS (
-         SELECT DISTINCT ON (base_name_he, date_bin('3 minutes', alerted_at, '1970-01-01'), category)
-           base_name_he, base_name_en, alerted_at, category, category_desc, lat, lon, orig_name_he
+       with_prev AS (
+         SELECT base_name_he, base_name_en, alerted_at, category, category_desc, lat, lon, orig_name_he,
+                LAG(alerted_at) OVER (PARTITION BY base_name_he, category ORDER BY alerted_at) AS prev_at
          FROM base
-         ORDER BY base_name_he, date_bin('3 minutes', alerted_at, '1970-01-01'), category
+       ),
+       deduped AS (
+         SELECT base_name_he, base_name_en, alerted_at, category, category_desc, lat, lon, orig_name_he
+         FROM with_prev
+         WHERE prev_at IS NULL
+            OR alerted_at - prev_at >= INTERVAL '5 minutes'
        )
        SELECT
          base_name_he                                      AS area_name_he,
@@ -174,18 +175,24 @@ router.get('/areas/:area/alerts', validateAreaParam, async (req, res) => {
   const area = req.params.area;
   const tc = timeClause(req.query, 3);
   try {
-    // DISTINCT ON (3-minute-bucketed alerted_at, category) collapses sibling
-    // sub-areas AND near-duplicate rows (the poller can record the same active
-    // alert every ~15 s with slightly different timestamps across minute
-    // boundaries) into one row per 3-minute bucket+category.
+    // Gap-based dedup: keep only the first alert per category when consecutive
+    // alerts of the same category are less than 5 minutes apart.  This avoids
+    // the bucket-boundary problem where two alerts 1–2 min apart could straddle
+    // a fixed time-bin edge and appear as separate events.
     const result = await pool.query(
-      `SELECT DISTINCT ON (date_bin('3 minutes', alerted_at, '1970-01-01'), category)
-         id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
-       FROM alerts
-       WHERE ${areaClause(1)}
-         AND ${tc.clause}
-         AND ${EXCLUDE_FILTER}
-       ORDER BY date_bin('3 minutes', alerted_at, '1970-01-01') DESC, category
+      `WITH ordered AS (
+         SELECT id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at,
+                LAG(alerted_at) OVER (PARTITION BY category ORDER BY alerted_at) AS prev_at
+         FROM alerts
+         WHERE ${areaClause(1)}
+           AND ${tc.clause}
+           AND ${EXCLUDE_FILTER}
+       )
+       SELECT id, oref_id, category, category_desc, area_name, area_name_he, lat, lon, alerted_at
+       FROM ordered
+       WHERE prev_at IS NULL
+          OR alerted_at - prev_at >= INTERVAL '5 minutes'
+       ORDER BY alerted_at DESC
        LIMIT 100`,
       [...areaParams(area), ...tc.params]
     );
@@ -204,12 +211,10 @@ router.get('/areas/:area/stats', validateAreaParam, async (req, res) => {
   const tc = timeClause(req.query, 3);
   const qParams = [...areaParams(area), ...tc.params];
 
-  // DISTINCT ON (3-minute-bucketed alerted_at, category) collapses sibling
-  // sub-areas AND near-duplicate rows from the poller (which can record the
-  // same active alert every ~15 s across minute boundaries) so chart counts
-  // reflect unique events.
+  // Gap-based dedup collapses consecutive alerts of the same category that
+  // are < 5 min apart, so chart counts reflect unique events.
   const dedupFilter = `${areaClause(1)} AND ${tc.clause} AND ${EXCLUDE_FILTER}`;
-  const dedupSql = dedupCteWithColumns(dedupFilter);
+  const dedupSql = dedupCte(dedupFilter, ['category', 'category_desc']);
 
   try {
     const [byType, byDay, byHour, totalResult] = await Promise.all([
@@ -435,9 +440,7 @@ router.get('/areas/:area/prediction', validateAreaParam, async (req, res) => {
     const predFilter = `${areaClause(1)} AND ${EXCLUDE_FILTER}`;
     const predParams = areaParams(area);
 
-    // Deduplicate using 3-minute bucketing to collapse sibling sub-areas and
-    // near-duplicate polling rows into one alert per bucket+category, matching
-    // the deduplication logic in /api/areas/:area/stats.
+    // Gap-based dedup: collapse consecutive same-category alerts < 5 min apart.
     const predDedupSql = dedupCte(predFilter);
 
     const [observationResult, hourlyResult, last24hResult, lastAlertResult, dowResult] =
@@ -732,7 +735,7 @@ router.get('/live', async (req, res) => {
     // Cat 13 = "All Clear / danger passed" — not an active alarm.
     // Signal the client to play a gentle chime and show a cleared toast.
     if (live.category === 13) {
-      return res.json({ active: false, preAlert: true, alertDate: live.alertDate });
+      return res.json({ active: false, allClear: true, alertDate: live.alertDate });
     }
 
     // Cat 10 = "Pre-Alert" (preliminary warning before the main siren).
