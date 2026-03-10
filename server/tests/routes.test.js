@@ -95,14 +95,14 @@ describe('GET /api/areas/:area/alerts  (RESTful path param)', () => {
     expect(res.body[0].alerted_at).toBe(ts);
   });
 
-  test('SQL uses date_bin(3 minutes) for dedup, not exact timestamps', async () => {
-    // Verify the query uses 3-minute-bucket dedup to collapse near-duplicate
-    // alerts that the poller records every ~15 s across minute boundaries.
+  test('SQL uses gap-based dedup (LAG + 5-minute interval), not exact timestamps', async () => {
+    // Verify the query uses gap-based dedup to collapse consecutive same-category
+    // alerts that are less than 5 minutes apart.
     pool.query.mockResolvedValue({ rows: [] });
     await request(app).get('/api/areas/Test/alerts');
     const sql = pool.query.mock.calls[0][0];
-    expect(sql).toContain("date_bin('3 minutes', alerted_at, '1970-01-01')");
-    expect(sql).not.toMatch(/DISTINCT ON \(alerted_at,/);
+    expect(sql).toContain("INTERVAL '5 minutes'");
+    expect(sql).toContain('LAG(alerted_at)');
   });
 
   test('returns 500 on DB error', async () => {
@@ -152,7 +152,8 @@ describe('GET /api/areas/:area/stats  (RESTful path param)', () => {
     await request(app).get('/api/areas/Test/stats');
     // All four stats queries share the same dedupCte; check the first one
     const sql = pool.query.mock.calls[0][0];
-    expect(sql).toContain("date_bin('3 minutes', alerted_at, '1970-01-01')");
+    expect(sql).toContain("INTERVAL '5 minutes'");
+    expect(sql).toContain('LAG(alerted_at)');
   });
 });
 
