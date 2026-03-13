@@ -23,11 +23,12 @@ const SCENARIOS = [
     cleared: false,
   },
   {
-    id: 'alarm-preAlert10',
-    label: '⚠️ Pre-Alert (cat 10)',
-    description: 'Amber overlay + soft beep',
-    alarm: { category: 10, categoryDesc: 'Pre-Alert', alertDate: null },
-    cleared: false,
+    id: 'allClear-cat10',
+    label: '✓ All Clear (cat 10)',
+    description: 'Green bottom toast + stand-down chime',
+    alarm: null,
+    cleared: true,
+    playStandDown: true,
   },
   {
     id: 'alarm-preAlert',
