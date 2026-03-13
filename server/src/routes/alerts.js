@@ -709,8 +709,8 @@ router.get('/status', async (_req, res) => {
 // With ?area=<hebrewName>: performs base-city match on the server.
 //   Possible responses:
 //   → { active: false }                           — no alert for this area
-//   → { active: false, allClear: true, alertDate } — cat 10/13: danger passed
-//   → { active: true, category, categoryDesc, alertDate } — real alert (cat 1/2/14 etc.)
+//   → { active: false, allClear: true, alertDate } — cat 14: all clear / stand-down
+//   → { active: true, category, categoryDesc, alertDate } — real alert (cat 1/2/10 etc.)
 //   The `areas` array is omitted — the caller only needs the boolean + metadata.
 router.get('/live', async (req, res) => {
   try {
@@ -732,14 +732,18 @@ router.get('/live', async (req, res) => {
       return res.json({ active: false });
     }
 
-    // Cat 10 and 13 = "All Clear / danger passed" — not an active alarm.
+    // Cat 14 = "All Clear / Stand Down" — danger passed.
     // Signal the client to play a gentle chime and show a cleared toast.
-    if (live.category === 10 || live.category === 13) {
+    if (live.category === 14) {
       return res.json({ active: false, allClear: true, alertDate: live.alertDate });
     }
 
-    // Cat 14 = "Pre-Alert / Stand By" (danger incoming — get ready).
-    // Treated as active alarm with softer client-side presentation.
+    // Cat 13 = no meaningful action needed — treat as inactive with no special signal.
+    if (live.category === 13) {
+      return res.json({ active: false });
+    }
+
+    // Cat 10 = "Pre-Alert" (preliminary warning — get ready).
     // All other categories also pass through as active alarms.
     return res.json({
       active: true,

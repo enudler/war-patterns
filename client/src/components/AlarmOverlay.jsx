@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 const CATEGORY_ICON = {
   1:  '🚀',
   2:  '🛸',
+  10: '⚠️',
   14: '⚠️',
 };
 
@@ -12,9 +13,9 @@ const PHASE_META = {
   allClear: { icon: '✓',  label: 'All Clear' },
 };
 
-// Cat 14 ("get ready") uses amber; everything else uses red.
+// Cat 10 ("get ready" / pre-alert) uses amber; everything else uses red.
 function alarmColors(category) {
-  if (category === 14) {
+  if (category === 10) {
     return {
       overlayBg:  'rgba(146, 64, 14, 0.92)',   // amber-900
       bannerBg:   '#78350f',                    // amber-900 dark
@@ -148,7 +149,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
       >
         <CategoryIcon category={alarm.category} />
         <div style={{ fontSize: 13, letterSpacing: 4, textTransform: 'uppercase', opacity: 0.8, marginBottom: 4 }}>
-          {alarm.category === 14 ? 'Stand By — Get Ready' : 'Active Alarm'}
+          {alarm.category === 10 ? 'Stand By — Get Ready' : 'Active Alarm'}
         </div>
         <h1 style={{ margin: '4px 0 8px', fontSize: 36, fontWeight: 700, letterSpacing: 1 }}>
           {alarm.categoryDesc}
@@ -202,7 +203,7 @@ export default function AlarmOverlay({ alarm, cleared, monitoredAreaLabel, onDis
       >
         <span>{CATEGORY_ICON[alarm.category] ?? '🚨'}</span>
         <span>
-          <strong>{alarm.category === 14 ? 'STAND BY' : 'ACTIVE ALARM'}</strong>{' '}
+          <strong>{alarm.category === 10 ? 'STAND BY' : 'ACTIVE ALARM'}</strong>{' '}
           — {alarm.categoryDesc} in {monitoredAreaLabel}
         </span>
         <InlineTimeline entries={timeline} />
