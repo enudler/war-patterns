@@ -226,9 +226,9 @@ export default function App() {
             ? String(Math.floor(new Date(live.alertDate.replace(' ', 'T')).getTime() / (3 * 60_000)))
             : 'unknown';
 
-          // Cat 14 = pre-alert → soft beep; all others → full siren.
+          // Cat 10 = pre-alert → soft beep; all others → full siren.
           const startSound = () =>
-            live.category === 14 ? createPreAlertSound() : createAlarmSound();
+            live.category === 10 ? createPreAlertSound() : createAlarmSound();
 
           if (!prevAlarmActive.current) {
             // Alarm just started — show notification, overlay and sound.
@@ -240,7 +240,7 @@ export default function App() {
             prevAlarmCategoryRef.current = live.category;
             alarmSoundRef.current = startSound();
             // Start a fresh timeline for this new incident.
-            const phase = live.category === 14 ? 'preAlert' : 'alarm';
+            const phase = live.category === 10 ? 'preAlert' : 'alarm';
             setAlarmTimeline([{ phase, time: new Date(), alarm: live }]);
           } else if (bucket !== activeAlarmBucketRef.current) {
             // Same area, but a genuinely new alarm event (different 3-min bucket).
@@ -254,12 +254,12 @@ export default function App() {
             // Restart sound for the new event.
             alarmSoundRef.current?.stop();
             alarmSoundRef.current = startSound();
-            if (prevCat === 14 && (newCat === 1 || newCat === 2)) {
+            if (prevCat === 10 && (newCat === 1 || newCat === 2)) {
               // Upgrade: pre-alert → actual alarm — append to current timeline.
               setAlarmTimeline(prev => [...prev, { phase: 'alarm', time: new Date(), alarm: live }]);
             } else {
               // New or unrelated incident — reset timeline.
-              const phase = newCat === 14 ? 'preAlert' : 'alarm';
+              const phase = newCat === 10 ? 'preAlert' : 'alarm';
               setAlarmTimeline([{ phase, time: new Date(), alarm: live }]);
             }
           }
@@ -382,7 +382,7 @@ export default function App() {
   useEffect(() => {
     const area = selectedAreaLabel ?? selectedArea;
     if (activeAlarm) {
-      const prefix = activeAlarm.category === 14 ? '⚠️ STAND BY' : '🚨 ALARM';
+      const prefix = activeAlarm.category === 10 ? '⚠️ STAND BY' : '🚨 ALARM';
       document.title = area ? `${prefix} — ${area}` : `${prefix} — War Patterns`;
     } else if (alarmCleared) {
       document.title = area ? `✅ All Clear — ${area}` : '✅ All Clear — War Patterns';
@@ -428,12 +428,12 @@ export default function App() {
       // Show in "dismissed → slim banner" state by setting a dismissed-at marker
       setDebugAlarm({ ...alarm, _dismissed: true });
       setDebugCleared(false);
-      if (alarm?.category === 14) debugSoundRef.current = createPreAlertSound();
+      if (alarm?.category === 10) debugSoundRef.current = createPreAlertSound();
       else if (alarm)            debugSoundRef.current = createAlarmSound();
     } else if (alarm) {
       setDebugAlarm(alarm);
       setDebugCleared(false);
-      if (alarm.category === 14) debugSoundRef.current = createPreAlertSound();
+      if (alarm.category === 10) debugSoundRef.current = createPreAlertSound();
       else                       debugSoundRef.current = createAlarmSound();
     } else {
       setDebugAlarm(null);
